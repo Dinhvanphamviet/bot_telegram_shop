@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"telegram-shop/internal/model"
@@ -25,22 +26,28 @@ func NewOrderRepo(db *pgxpool.Pool) *OrderRepo {
 // Create inserts a new order. Can be called within a transaction.
 func (r *OrderRepo) Create(ctx context.Context, tx pgx.Tx, o *model.Order) error {
 	o.ID = uuid.New()
+	if o.Quantity <= 0 {
+		o.Quantity = 1
+	}
 	return tx.QueryRow(ctx,
-		`INSERT INTO orders (id, user_id, item_id, amount, status, payment_method)
-		 VALUES ($1, $2, $3, $4, $5, $6)
+		`INSERT INTO orders (id, user_id, item_id, amount, quantity, status, payment_method)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
 		 RETURNING created_at`,
-		o.ID, o.UserID, o.ItemID, o.Amount, o.Status, o.PaymentMethod,
+		o.ID, o.UserID, o.ItemID, o.Amount, o.Quantity, o.Status, o.PaymentMethod,
 	).Scan(&o.CreatedAt)
 }
 
 // CreateNoTx inserts a new order without a transaction.
 func (r *OrderRepo) CreateNoTx(ctx context.Context, o *model.Order) error {
 	o.ID = uuid.New()
+	if o.Quantity <= 0 {
+		o.Quantity = 1
+	}
 	return r.db.QueryRow(ctx,
-		`INSERT INTO orders (id, user_id, item_id, amount, status, payment_method)
-		 VALUES ($1, $2, $3, $4, $5, $6)
+		`INSERT INTO orders (id, user_id, item_id, amount, quantity, status, payment_method)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
 		 RETURNING created_at`,
-		o.ID, o.UserID, o.ItemID, o.Amount, o.Status, o.PaymentMethod,
+		o.ID, o.UserID, o.ItemID, o.Amount, o.Quantity, o.Status, o.PaymentMethod,
 	).Scan(&o.CreatedAt)
 }
 
@@ -48,9 +55,9 @@ func (r *OrderRepo) CreateNoTx(ctx context.Context, o *model.Order) error {
 func (r *OrderRepo) FindByID(ctx context.Context, id uuid.UUID) (*model.Order, error) {
 	var o model.Order
 	err := r.db.QueryRow(ctx,
-		`SELECT id, user_id, item_id, product_link_id, amount, status, payment_method, created_at, completed_at
+		`SELECT id, user_id, item_id, product_link_id, amount, quantity, status, payment_method, created_at, completed_at
 		 FROM orders WHERE id = $1`, id,
-	).Scan(&o.ID, &o.UserID, &o.ItemID, &o.ProductLinkID, &o.Amount, &o.Status, &o.PaymentMethod, &o.CreatedAt, &o.CompletedAt)
+	).Scan(&o.ID, &o.UserID, &o.ItemID, &o.ProductLinkID, &o.Amount, &o.Quantity, &o.Status, &o.PaymentMethod, &o.CreatedAt, &o.CompletedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -63,10 +70,10 @@ func (r *OrderRepo) FindByID(ctx context.Context, id uuid.UUID) (*model.Order, e
 // FindByUserID returns orders for a user (newest first).
 func (r *OrderRepo) FindByUserID(ctx context.Context, userID uuid.UUID, limit, offset int) ([]model.OrderDetail, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT o.id, o.user_id, o.item_id, o.product_link_id, o.amount, o.status, o.payment_method,
+		`SELECT o.id, o.user_id, o.item_id, o.product_link_id, o.amount, o.quantity, o.status, o.payment_method,
 		        o.created_at, o.completed_at,
 		        i.name AS item_name, p.name AS product_name,
-		        COALESCE(pl.link, '') AS link
+		        COALESCE((SELECT string_agg(pl.link, E'\n') FROM product_links pl WHERE pl.order_id = o.id), COALESCE(pl.link, '')) AS link
 		 FROM orders o
 		 JOIN items i ON o.item_id = i.id
 		 JOIN products p ON i.product_id = p.id
@@ -83,11 +90,14 @@ func (r *OrderRepo) FindByUserID(ctx context.Context, userID uuid.UUID, limit, o
 	for rows.Next() {
 		var od model.OrderDetail
 		if err := rows.Scan(
-			&od.ID, &od.UserID, &od.ItemID, &od.ProductLinkID, &od.Amount, &od.Status, &od.PaymentMethod,
+			&od.ID, &od.UserID, &od.ItemID, &od.ProductLinkID, &od.Amount, &od.Quantity, &od.Status, &od.PaymentMethod,
 			&od.CreatedAt, &od.CompletedAt,
 			&od.ItemName, &od.ProductName, &od.Link,
 		); err != nil {
 			return nil, err
+		}
+		if od.Link != "" {
+			od.Links = strings.Split(od.Link, "\n")
 		}
 		orders = append(orders, od)
 	}
@@ -118,10 +128,10 @@ func (r *OrderRepo) SetProductLink(ctx context.Context, tx pgx.Tx, orderID, link
 // FindAll returns all orders (admin).
 func (r *OrderRepo) FindAll(ctx context.Context, limit, offset int) ([]model.OrderDetail, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT o.id, o.user_id, o.item_id, o.product_link_id, o.amount, o.status, o.payment_method,
+		`SELECT o.id, o.user_id, o.item_id, o.product_link_id, o.amount, o.quantity, o.status, o.payment_method,
 		        o.created_at, o.completed_at,
 		        i.name AS item_name, p.name AS product_name,
-		        COALESCE(pl.link, '') AS link
+		        COALESCE((SELECT string_agg(pl.link, E'\n') FROM product_links pl WHERE pl.order_id = o.id), COALESCE(pl.link, '')) AS link
 		 FROM orders o
 		 JOIN items i ON o.item_id = i.id
 		 JOIN products p ON i.product_id = p.id
@@ -137,13 +147,17 @@ func (r *OrderRepo) FindAll(ctx context.Context, limit, offset int) ([]model.Ord
 	for rows.Next() {
 		var od model.OrderDetail
 		if err := rows.Scan(
-			&od.ID, &od.UserID, &od.ItemID, &od.ProductLinkID, &od.Amount, &od.Status, &od.PaymentMethod,
+			&od.ID, &od.UserID, &od.ItemID, &od.ProductLinkID, &od.Amount, &od.Quantity, &od.Status, &od.PaymentMethod,
 			&od.CreatedAt, &od.CompletedAt,
 			&od.ItemName, &od.ProductName, &od.Link,
 		); err != nil {
 			return nil, err
 		}
+		if od.Link != "" {
+			od.Links = strings.Split(od.Link, "\n")
+		}
 		orders = append(orders, od)
 	}
 	return orders, rows.Err()
 }
+

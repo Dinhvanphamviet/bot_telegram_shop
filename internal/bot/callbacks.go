@@ -21,6 +21,7 @@ type CallbackHandler struct {
 	productService *service.ProductService
 	orderService   *service.OrderService
 	walletService  *service.WalletService
+	stateManager   *StateManager
 }
 
 // NewCallbackHandler creates a new CallbackHandler.
@@ -31,6 +32,7 @@ func NewCallbackHandler(
 	productService *service.ProductService,
 	orderService *service.OrderService,
 	walletService *service.WalletService,
+	stateManager *StateManager,
 ) *CallbackHandler {
 	return &CallbackHandler{
 		bot:            bot,
@@ -39,6 +41,7 @@ func NewCallbackHandler(
 		productService: productService,
 		orderService:   orderService,
 		walletService:  walletService,
+		stateManager:   stateManager,
 	}
 }
 
@@ -65,23 +68,67 @@ func (h *CallbackHandler) HandleCallback(ctx context.Context, cb *CallbackQuery)
 	data := cb.Data
 
 	switch {
-	case data == "products":
+	case data == "close":
+		h.stateManager.Clear(cb.From.ID)
+		_ = h.bot.DeleteMessage(chatID, msgID)
+
+	case data == "products" || data == "products:refresh":
+		h.stateManager.Clear(cb.From.ID)
+		if data == "products:refresh" {
+			_ = h.bot.AnswerCallbackQuery(cb.ID, "🔄 Đã làm mới danh sách!")
+		}
 		h.handleProducts(ctx, chatID, msgID)
 
 	case data == "wallet":
+		h.stateManager.Clear(cb.From.ID)
 		h.handleWallet(ctx, chatID, msgID, user.ID)
 
 	case data == "orders":
+		h.stateManager.Clear(cb.From.ID)
 		h.handleOrders(ctx, chatID, msgID, user.ID, 0)
 
 	case data == "help":
+		h.stateManager.Clear(cb.From.ID)
 		h.bot.EditMessageText(chatID, msgID, MsgHelp(), KbBackToMenu())
 
 	case strings.HasPrefix(data, "product:"):
+		h.stateManager.Clear(cb.From.ID)
 		h.handleProductDetail(ctx, chatID, msgID, data[8:])
 
 	case strings.HasPrefix(data, "item:"):
-		h.handleItemDetail(ctx, chatID, msgID, data[5:])
+		h.stateManager.Clear(cb.From.ID)
+		h.handleItemDetail(ctx, chatID, msgID, user.ID, data[5:])
+
+	case strings.HasPrefix(data, "qty:"):
+		// Format: qty:{itemID}:{count}
+		h.stateManager.Clear(cb.From.ID)
+		parts := strings.Split(data, ":")
+		if len(parts) == 3 {
+			qty, _ := strconv.Atoi(parts[2])
+			h.handleSelectQuantity(ctx, chatID, msgID, user.ID, parts[1], qty)
+		}
+
+	case strings.HasPrefix(data, "qty_custom:"):
+		// Format: qty_custom:{itemID}
+		h.handlePromptCustomQuantity(ctx, chatID, msgID, cb.From.ID, data[11:])
+
+	case strings.HasPrefix(data, "confirm_buy_wallet:"):
+		// Format: confirm_buy_wallet:{itemID}:{count}
+		h.stateManager.Clear(cb.From.ID)
+		parts := strings.Split(data, ":")
+		if len(parts) == 3 {
+			qty, _ := strconv.Atoi(parts[2])
+			h.handleConfirmBuyWallet(ctx, chatID, msgID, user.ID, parts[1], qty)
+		}
+
+	case strings.HasPrefix(data, "confirm_buy_qr:"):
+		// Format: confirm_buy_qr:{itemID}:{count}
+		h.stateManager.Clear(cb.From.ID)
+		parts := strings.Split(data, ":")
+		if len(parts) == 3 {
+			qty, _ := strconv.Atoi(parts[2])
+			h.handleConfirmBuyQR(ctx, chatID, msgID, user.ID, parts[1], qty)
+		}
 
 	case strings.HasPrefix(data, "buy_qr:"):
 		h.handleBuyQR(ctx, chatID, msgID, user.ID, data[7:])
@@ -93,7 +140,7 @@ func (h *CallbackHandler) HandleCallback(ctx context.Context, cb *CallbackQuery)
 		h.handleConfirmWallet(ctx, chatID, msgID, user.ID, data[15:])
 
 	case strings.HasPrefix(data, "deposit:"):
-		h.handleDeposit(ctx, chatID, msgID, user.ID, data[8:])
+		h.handleDeposit(ctx, chatID, msgID, user.ID, cb.From.ID, data[8:])
 
 	case data == "wallet:history":
 		h.handleWalletHistory(ctx, chatID, msgID, user.ID)
@@ -103,6 +150,7 @@ func (h *CallbackHandler) HandleCallback(ctx context.Context, cb *CallbackQuery)
 		h.handleOrders(ctx, chatID, msgID, user.ID, page)
 
 	case data == "back:menu":
+		h.stateManager.Clear(cb.From.ID)
 		firstName := cb.From.FirstName
 		if firstName == "" {
 			firstName = "bạn"
@@ -110,9 +158,11 @@ func (h *CallbackHandler) HandleCallback(ctx context.Context, cb *CallbackQuery)
 		h.bot.EditMessageText(chatID, msgID, MsgWelcome(firstName), KbMainMenu())
 
 	case data == "back:products":
+		h.stateManager.Clear(cb.From.ID)
 		h.handleProducts(ctx, chatID, msgID)
 
 	case strings.HasPrefix(data, "back:product:"):
+		h.stateManager.Clear(cb.From.ID)
 		h.handleProductDetail(ctx, chatID, msgID, data[13:])
 
 	case strings.HasPrefix(data, "admin:"):
@@ -132,7 +182,7 @@ func (h *CallbackHandler) handleProducts(ctx context.Context, chatID, msgID int6
 		return
 	}
 	if len(products) == 0 {
-		h.bot.EditMessageText(chatID, msgID, MsgNoProducts(), KbBackToMenu())
+		h.bot.EditMessageText(chatID, msgID, MsgNoProducts(), KbNoProducts())
 		return
 	}
 	h.bot.EditMessageText(chatID, msgID, MsgProductList(), KbProductList(products))
@@ -165,7 +215,7 @@ func (h *CallbackHandler) handleProductDetail(ctx context.Context, chatID, msgID
 	h.bot.EditMessageText(chatID, msgID, text, KbItemList(items, productID))
 }
 
-func (h *CallbackHandler) handleItemDetail(ctx context.Context, chatID, msgID int64, idStr string) {
+func (h *CallbackHandler) handleItemDetail(ctx context.Context, chatID, msgID int64, userID uuid.UUID, idStr string) {
 	itemID, err := uuid.Parse(idStr)
 	if err != nil {
 		h.bot.EditMessageText(chatID, msgID, MsgError(), KbBackToMenu())
@@ -179,80 +229,87 @@ func (h *CallbackHandler) handleItemDetail(ctx context.Context, chatID, msgID in
 		return
 	}
 
-	var stockStatus string
-	if availableCount > 0 {
-		stockStatus = MsgInStock(availableCount)
-	} else {
-		stockStatus = MsgOutOfStock()
+	product, _ := h.productService.GetProduct(ctx, item.ProductID)
+	productName := ""
+	if product != nil {
+		productName = product.Name
 	}
 
-	text := fmt.Sprintf("🛒 <b>%s</b>\n\n💰 Giá: <b>%s</b>\n📊 Tình trạng: %s",
-		item.Name, FormatMoney(item.Price), stockStatus)
-	if item.Description != "" {
-		text += fmt.Sprintf("\n\n📝 %s", item.Description)
-	}
+	balance, _ := h.walletService.GetBalance(ctx, userID)
+	shortID := strings.ToUpper(item.ID.String()[:4])
 
+	text := MsgItemDetail(productName, item.Name, item.Description, shortID, item.Price, balance, availableCount)
 	h.bot.EditMessageText(chatID, msgID, text, KbItemDetail(itemID, availableCount, item.ProductID))
 }
 
-func (h *CallbackHandler) handleBuyQR(ctx context.Context, chatID, msgID int64, userID uuid.UUID, idStr string) {
+func (h *CallbackHandler) handleSelectQuantity(ctx context.Context, chatID, msgID int64, userID uuid.UUID, idStr string, quantity int) {
+	if quantity <= 0 {
+		quantity = 1
+	}
+
 	itemID, err := uuid.Parse(idStr)
 	if err != nil {
 		h.bot.EditMessageText(chatID, msgID, MsgError(), KbBackToMenu())
 		return
 	}
 
-	item, err := h.productService.GetItem(ctx, itemID)
+	item, availableCount, err := h.productService.GetItemDetail(ctx, itemID)
 	if err != nil || item == nil {
 		h.bot.EditMessageText(chatID, msgID, MsgError(), KbBackToMenu())
 		return
 	}
 
-	order, payment, qrURL, err := h.orderService.PurchaseWithQR(ctx, userID, itemID)
-	if err != nil {
-		log.Printf("Error creating QR purchase: %v", err)
-		h.bot.EditMessageText(chatID, msgID, fmt.Sprintf("❌ %s", err.Error()), KbBackToMenu())
+	if availableCount < quantity {
+		h.bot.EditMessageText(chatID, msgID,
+			fmt.Sprintf("⚠️ Kho hiện chỉ còn <b>%d</b> sản phẩm, không đủ số lượng bạn chọn (%d).", availableCount, quantity),
+			KbItemDetail(itemID, availableCount, item.ProductID))
 		return
 	}
 
-	// Send QR image
-	caption := MsgQRPayment(item.Name, order.Amount, payment.TransferContent, 15)
-	h.bot.EditMessageText(chatID, msgID, "⏳ Đang tạo QR thanh toán...", nil)
-	h.bot.SendPhoto(chatID, qrURL, caption, KbBackToMenu())
+	balance, _ := h.walletService.GetBalance(ctx, userID)
+	totalAmount := item.Price * int64(quantity)
+	canWallet := balance >= totalAmount
+
+	text := MsgConfirmOrder(item.Name, quantity, item.Price, totalAmount, balance)
+	h.bot.EditMessageText(chatID, msgID, text, KbConfirmOrder(itemID, quantity, canWallet))
 }
 
-func (h *CallbackHandler) handleBuyWallet(ctx context.Context, chatID, msgID int64, userID uuid.UUID, idStr string) {
+func (h *CallbackHandler) handlePromptCustomQuantity(ctx context.Context, chatID, msgID int64, telegramID int64, idStr string) {
 	itemID, err := uuid.Parse(idStr)
 	if err != nil {
 		h.bot.EditMessageText(chatID, msgID, MsgError(), KbBackToMenu())
 		return
 	}
 
-	item, err := h.productService.GetItem(ctx, itemID)
+	item, availableCount, err := h.productService.GetItemDetail(ctx, itemID)
 	if err != nil || item == nil {
 		h.bot.EditMessageText(chatID, msgID, MsgError(), KbBackToMenu())
 		return
 	}
 
-	balance, err := h.walletService.GetBalance(ctx, userID)
-	if err != nil {
-		h.bot.EditMessageText(chatID, msgID, MsgError(), KbBackToMenu())
+	if availableCount <= 0 {
+		h.bot.EditMessageText(chatID, msgID, "🔴 Sản phẩm này hiện đã hết hàng.", KbBackToMenu())
 		return
 	}
 
-	if balance < item.Price {
-		text := fmt.Sprintf("❌ <b>Số dư không đủ!</b>\n\n💰 Giá: %s\n💵 Số dư: %s\n\nVui lòng nạp thêm tiền.",
-			FormatMoney(item.Price), FormatMoney(balance))
-		h.bot.EditMessageText(chatID, msgID, text, KbWallet())
-		return
-	}
+	h.stateManager.Set(telegramID, UserState{
+		Action:    ActionWaitingQuantity,
+		ItemID:    itemID,
+		ProductID: item.ProductID,
+		ItemName:  item.Name,
+		Stock:     availableCount,
+	})
 
 	h.bot.EditMessageText(chatID, msgID,
-		MsgConfirmPurchase(item.Name, item.Price, balance),
-		KbConfirmWalletPurchase(itemID))
+		MsgPromptCustomQuantity(item.Name, availableCount),
+		KbCancel(fmt.Sprintf("item:%s", itemID)))
 }
 
-func (h *CallbackHandler) handleConfirmWallet(ctx context.Context, chatID, msgID int64, userID uuid.UUID, idStr string) {
+func (h *CallbackHandler) handleConfirmBuyWallet(ctx context.Context, chatID, msgID int64, userID uuid.UUID, idStr string, quantity int) {
+	if quantity <= 0 {
+		quantity = 1
+	}
+
 	itemID, err := uuid.Parse(idStr)
 	if err != nil {
 		h.bot.EditMessageText(chatID, msgID, MsgError(), KbBackToMenu())
@@ -265,22 +322,80 @@ func (h *CallbackHandler) handleConfirmWallet(ctx context.Context, chatID, msgID
 		return
 	}
 
-	_, link, err := h.orderService.PurchaseWithBalance(ctx, userID, itemID)
+	order, links, err := h.orderService.PurchaseWithBalance(ctx, userID, itemID, quantity)
 	if err != nil {
 		log.Printf("Error purchasing with wallet: %v", err)
 		h.bot.EditMessageText(chatID, msgID, fmt.Sprintf("❌ %s", err.Error()), KbBackToMenu())
 		return
 	}
 
+	var linkTexts []string
+	for _, l := range links {
+		linkTexts = append(linkTexts, l.Link)
+	}
+
 	h.bot.EditMessageText(chatID, msgID,
-		MsgPurchaseSuccess(item.Name, link.Link),
+		MsgPurchaseSuccessMulti(item.Name, quantity, order.Amount, linkTexts),
 		KbBackToMenu())
 }
 
-func (h *CallbackHandler) handleDeposit(ctx context.Context, chatID, msgID int64, userID uuid.UUID, amountStr string) {
+func (h *CallbackHandler) handleConfirmBuyQR(ctx context.Context, chatID, msgID int64, userID uuid.UUID, idStr string, quantity int) {
+	if quantity <= 0 {
+		quantity = 1
+	}
+
+	itemID, err := uuid.Parse(idStr)
+	if err != nil {
+		h.bot.EditMessageText(chatID, msgID, MsgError(), KbBackToMenu())
+		return
+	}
+
+	item, err := h.productService.GetItem(ctx, itemID)
+	if err != nil || item == nil {
+		h.bot.EditMessageText(chatID, msgID, MsgError(), KbBackToMenu())
+		return
+	}
+
+	order, payment, qrURL, err := h.orderService.PurchaseWithQR(ctx, userID, itemID, quantity)
+	if err != nil {
+		log.Printf("Error creating QR purchase: %v", err)
+		h.bot.EditMessageText(chatID, msgID, fmt.Sprintf("❌ %s", err.Error()), KbBackToMenu())
+		return
+	}
+
+	caption := MsgQRPaymentOrder(item.Name, quantity, order.Amount, payment.TransferContent, 15)
+	if err := h.bot.SendPhoto(chatID, qrURL, caption, KbBackToMenu()); err != nil {
+		log.Printf("Error sending purchase QR: %v", err)
+		h.bot.EditMessageText(chatID, msgID, MsgError(), KbBackToMenu())
+		return
+	}
+	h.bot.EditMessageText(chatID, msgID, "✅ Đã tạo mã QR thanh toán bên dưới 👇", nil)
+}
+
+func (h *CallbackHandler) handleBuyQR(ctx context.Context, chatID, msgID int64, userID uuid.UUID, idStr string) {
+	h.handleConfirmBuyQR(ctx, chatID, msgID, userID, idStr, 1)
+}
+
+func (h *CallbackHandler) handleBuyWallet(ctx context.Context, chatID, msgID int64, userID uuid.UUID, idStr string) {
+	h.handleSelectQuantity(ctx, chatID, msgID, userID, idStr, 1)
+}
+
+func (h *CallbackHandler) handleConfirmWallet(ctx context.Context, chatID, msgID int64, userID uuid.UUID, idStr string) {
+	h.handleConfirmBuyWallet(ctx, chatID, msgID, userID, idStr, 1)
+}
+
+func (h *CallbackHandler) handleDeposit(ctx context.Context, chatID, msgID int64, userID uuid.UUID, telegramID int64, amountStr string) {
+	if amountStr == "custom" {
+		h.stateManager.Set(telegramID, UserState{
+			Action: ActionWaitingDepositAmount,
+		})
+		h.bot.EditMessageText(chatID, msgID, MsgPromptCustomDeposit(), KbCancel("wallet"))
+		return
+	}
+
 	amount, err := strconv.ParseInt(amountStr, 10, 64)
 	if err != nil || amount < 10000 {
-		h.bot.EditMessageText(chatID, msgID, "❌ Số tiền không hợp lệ", KbBackToMenu())
+		h.bot.EditMessageText(chatID, msgID, "❌ Số tiền không hợp lệ (tối thiểu 10.000đ)", KbBackToMenu())
 		return
 	}
 
@@ -291,8 +406,12 @@ func (h *CallbackHandler) handleDeposit(ctx context.Context, chatID, msgID int64
 		return
 	}
 
-	h.bot.EditMessageText(chatID, msgID, "⏳ Đang tạo QR nạp tiền...", nil)
-	h.bot.SendPhoto(chatID, qrURL, MsgDepositQR(amount, payment.TransferContent), KbBackToMenu())
+	if err := h.bot.SendPhoto(chatID, qrURL, MsgDepositQR(amount, payment.TransferContent), KbBackToMenu()); err != nil {
+		log.Printf("Error sending deposit QR: %v", err)
+		h.bot.EditMessageText(chatID, msgID, MsgError(), KbBackToMenu())
+		return
+	}
+	h.bot.EditMessageText(chatID, msgID, "✅ Đã tạo mã QR nạp tiền bên dưới 👇", nil)
 }
 
 func (h *CallbackHandler) handleWallet(ctx context.Context, chatID, msgID int64, userID uuid.UUID) {

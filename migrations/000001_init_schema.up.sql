@@ -59,6 +59,7 @@ CREATE TABLE orders (
     item_id UUID NOT NULL REFERENCES items(id),
     product_link_id UUID, -- gán sau khi thanh toán thành công
     amount BIGINT NOT NULL,
+    quantity INT NOT NULL DEFAULT 1,
     status VARCHAR(20) NOT NULL DEFAULT 'PENDING', -- PENDING, PAID, CANCELLED, EXPIRED
     payment_method VARCHAR(20) NOT NULL DEFAULT 'QR', -- QR, WALLET
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -151,3 +152,6 @@ CREATE TRIGGER update_items_updated_at BEFORE UPDATE ON items
 
 CREATE TRIGGER update_payments_updated_at BEFORE UPDATE ON payments
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Migration upgrade safeguard for existing installations
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS quantity INT NOT NULL DEFAULT 1;

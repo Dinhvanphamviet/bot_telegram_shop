@@ -2,6 +2,7 @@ package bot
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -112,17 +113,18 @@ func MsgHelp() string {
 💰 <b>/wallet</b> — Xem ví & nạp tiền
 📦 <b>/orders</b> — Xem đơn hàng
 📋 <b>/menu</b> — Menu chính
+🧹 <b>/clear</b> — Xóa tin nhắn cũ, làm sạch màn hình chat
 
 <b>Cách mua hàng:</b>
 1️⃣ Chọn sản phẩm từ danh sách
-2️⃣ Chọn gói bạn muốn
+2️⃣ Chọn số lượng muốn mua
 3️⃣ Thanh toán bằng QR hoặc số dư ví
 4️⃣ Nhận link sản phẩm ngay lập tức!
 
 <b>Nạp tiền:</b>
-Vào /wallet → Nạp tiền → Quét QR → Tiền vào ví tự động
+Vào /wallet → Nạp tiền (chọn sẵn hoặc tự nhập số khác) → Quét QR → Tiền vào ví tự động
 
-💬 Liên hệ hỗ trợ: @admin`
+💬 Liên hệ hỗ trợ: @dinhvpviet`
 }
 
 // MsgOrderHistory returns order history header.
@@ -224,15 +226,142 @@ Xin lỗi vì sự bất tiện!`, FormatMoney(amount), reason)
 
 // MsgOutOfStock returns out of stock indicator.
 func MsgOutOfStock() string {
-	return "🔴 Hết hàng"
+	return "❌ Hết hàng"
 }
 
 // MsgInStock returns in stock indicator.
 func MsgInStock(count int) string {
-	return fmt.Sprintf("🟢 Còn %d", count)
+	return fmt.Sprintf("✅ Còn %d", count)
 }
 
 // MsgError returns a generic error message.
 func MsgError() string {
 	return "❌ Đã xảy ra lỗi. Vui lòng thử lại sau."
 }
+
+// MsgPaymentExpired returns message when payment expires.
+func MsgPaymentExpired(content string) string {
+	return fmt.Sprintf(`⏰ <b>Yêu cầu thanh toán đã hết hạn!</b>
+
+Mã giao dịch: <code>%s</code>
+Đã quá thời gian chờ thanh toán nên hệ thống đã tự động hủy yêu cầu này.
+
+💡 <i>Nếu bạn vẫn muốn nạp tiền hoặc mua hàng, vui lòng tạo mã mới từ Menu nhé!</i>`, content)
+}
+
+// MsgItemDetail returns product details formatted matching reference UI screenshot.
+func MsgItemDetail(productName, itemName, description string, shortID string, price, balance int64, stock int) string {
+	var sb strings.Builder
+	sb.WriteString("🛍 <b>THÔNG TIN SẢN PHẨM</b>\n")
+	sb.WriteString("───────────────────\n")
+	if productName != "" && productName != itemName {
+		sb.WriteString(fmt.Sprintf("📦 <b>%s — %s</b>\n\n", productName, itemName))
+	} else {
+		sb.WriteString(fmt.Sprintf("📦 <b>%s</b>\n\n", itemName))
+	}
+
+	if description != "" {
+		sb.WriteString(fmt.Sprintf("%s\n\n", description))
+	}
+
+	if shortID != "" {
+		sb.WriteString(fmt.Sprintf("🆔 Mã SP: <code>#%s</code>\n", shortID))
+	}
+	sb.WriteString(fmt.Sprintf("💵 Giá bán: <b>%s</b>\n", FormatMoney(price)))
+
+	if stock > 0 {
+		sb.WriteString(fmt.Sprintf("📦 Tồn kho: <b>%d</b>\n", stock))
+	} else {
+		sb.WriteString("📦 Tồn kho: 🔴 <b>Hết hàng</b>\n")
+	}
+
+	sb.WriteString(fmt.Sprintf("💰 Số dư ví: <b>%s</b>\n", FormatMoney(balance)))
+
+	if stock == 0 {
+		sb.WriteString("\n⚠️ <i>Sản phẩm này hiện đang tạm hết hàng, bạn vui lòng quay lại sau nhé!</i>")
+	} else if balance < price {
+		sb.WriteString("⚠️ <i>Ví chưa đủ để mua 1 sản phẩm.</i>\n\n👇 <b>Chọn số lượng muốn mua bên dưới:</b>")
+	} else {
+		canBuy := balance / price
+		sb.WriteString(fmt.Sprintf("✅ <i>Số dư ví đủ để mua <b>%d</b> sản phẩm.</i>\n\n👇 <b>Chọn số lượng muốn mua bên dưới:</b>", canBuy))
+	}
+
+	return sb.String()
+}
+
+// MsgConfirmOrder returns the order confirmation screen before payment.
+func MsgConfirmOrder(itemName string, quantity int, unitPrice, totalAmount, balance int64) string {
+	var walletNotice string
+	if balance >= totalAmount {
+		walletNotice = "✅ <i>Ví đủ số dư để thanh toán ngay lập tức.</i>"
+	} else {
+		deficit := totalAmount - balance
+		walletNotice = fmt.Sprintf("⚠️ <i>Ví còn thiếu <b>%s</b>. Bạn có thể thanh toán trực tiếp qua SePay QR hoặc nạp thêm tiền.</i>", FormatMoney(deficit))
+	}
+
+	return fmt.Sprintf(`🛒 <b>XÁC NHẬN ĐƠN HÀNG</b>
+───────────────────
+📦 <b>Sản phẩm:</b> %s
+🔢 <b>Số lượng:</b> <b>%d</b>
+💵 <b>Đơn giá:</b> %s
+💰 <b>Tổng thanh toán:</b> <b>%s</b>
+───────────────────
+💳 <b>Số dư ví hiện tại:</b> %s
+%s`, itemName, quantity, FormatMoney(unitPrice), FormatMoney(totalAmount), FormatMoney(balance), walletNotice)
+}
+
+// MsgPurchaseSuccessMulti returns successful purchase message with multiple links.
+func MsgPurchaseSuccessMulti(itemName string, quantity int, totalAmount int64, links []string) string {
+	var sb strings.Builder
+	sb.WriteString("🎉 <b>MUA HÀNG THÀNH CÔNG!</b>\n")
+	sb.WriteString("───────────────────\n")
+	sb.WriteString(fmt.Sprintf("📦 <b>Sản phẩm:</b> %s\n", itemName))
+	sb.WriteString(fmt.Sprintf("🔢 <b>Số lượng:</b> %d\n", quantity))
+	sb.WriteString(fmt.Sprintf("💰 <b>Tổng tiền:</b> %s\n", FormatMoney(totalAmount)))
+	sb.WriteString("───────────────────\n")
+	sb.WriteString("🔑 <b>THÔNG TIN SẢN PHẨM / LINK NHẬN HÀNG:</b>\n\n")
+
+	for i, link := range links {
+		sb.WriteString(fmt.Sprintf("%d. <code>%s</code>\n", i+1, link))
+	}
+
+	sb.WriteString("\n⚠️ <i>Lưu ý: Mỗi link chỉ dùng được 1 lần. Bạn có thể xem lại trong /orders bất cứ lúc nào!</i>")
+	return sb.String()
+}
+
+// MsgPromptCustomQuantity prompts the user to type custom quantity.
+func MsgPromptCustomQuantity(itemName string, stock int) string {
+	return fmt.Sprintf(`✏️ <b>Vui lòng nhập số lượng bạn muốn mua:</b>
+
+📦 <i>Sản phẩm: %s</i>
+📊 <i>(Tối thiểu: 1 — Tối đa hiện có: %d)</i>
+
+👇 Hãy gửi tin nhắn số lượng bạn muốn mua vào đây:`, itemName, stock)
+}
+
+// MsgPromptCustomDeposit prompts the user to type custom deposit amount.
+func MsgPromptCustomDeposit() string {
+	return `✏️ <b>Vui lòng nhập số tiền bạn muốn nạp (VNĐ):</b>
+
+<i>Ví dụ: 75000, 150.000, 50k, 100k, hoặc 1tr</i>
+<i>(Tối thiểu: 10.000đ — Tối đa: 50.000.000đ)</i>
+
+👇 Hãy gửi tin nhắn số tiền bạn muốn nạp vào đây:`
+}
+
+// MsgQRPaymentOrder returns QR payment instruction message for an order with quantity.
+func MsgQRPaymentOrder(itemName string, quantity int, amount int64, transferContent string, expireMinutes int) string {
+	return fmt.Sprintf(`💳 <b>Thanh toán đơn hàng qua QR</b>
+
+📦 <b>Sản phẩm:</b> %s (x%d)
+💰 <b>Tổng số tiền:</b> <b>%s</b>
+📝 <b>Nội dung CK:</b> <code>%s</code>
+
+⏳ Hết hạn sau: <b>%d phút</b>
+
+📱 Quét mã QR bên trên để thanh toán.
+⚠️ <b>Quan trọng:</b> Chuyển <b>đúng số tiền</b> và <b>đúng nội dung</b> để hệ thống tự động xác nhận và trả hàng ngay lập tức!`,
+		itemName, quantity, FormatMoney(amount), transferContent, expireMinutes)
+}
+
+

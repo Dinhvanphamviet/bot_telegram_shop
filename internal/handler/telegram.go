@@ -145,10 +145,24 @@ func (h *TelegramHandler) notifyUser(result *service.PaymentResult) {
 	}
 
 	var text string
-	if result.Success && result.Link != nil {
+	if result.Success && len(result.Links) > 0 {
+		linkTexts := make([]string, len(result.Links))
+		for i, l := range result.Links {
+			linkTexts[i] = l.Link
+		}
+		qty := 1
+		if result.Order != nil && result.Order.Quantity > 0 {
+			qty = result.Order.Quantity
+		}
+		amount := int64(0)
+		if result.Order != nil {
+			amount = result.Order.Amount
+		}
+		text = bot.MsgPurchaseSuccessMulti("Sản phẩm", qty, amount, linkTexts)
+	} else if result.Success && result.Link != nil {
 		text = bot.MsgPaymentReceived("Sản phẩm", result.Link.Link)
 	} else if result.NeedsRefund {
-		text = bot.MsgRefundNotice(result.Payment.Amount, "Sản phẩm đã hết hàng")
+		text = bot.MsgRefundNotice(result.Payment.Amount, "Sản phẩm không đủ hàng trong kho")
 	} else if result.Success && result.Payment != nil && result.Payment.PaymentType == "DEPOSIT" {
 		text = result.Message
 	} else {
@@ -156,7 +170,7 @@ func (h *TelegramHandler) notifyUser(result *service.PaymentResult) {
 	}
 
 	if text != "" {
-		h.bot.SendMessage(user.TelegramID, text, nil)
+		h.bot.SendMessage(user.TelegramID, text, bot.KbBackToMenu())
 	}
 }
 

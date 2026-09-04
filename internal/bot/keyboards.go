@@ -26,14 +26,31 @@ func KbMainMenu() *InlineKeyboardMarkup {
 func KbProductList(products []model.Product) *InlineKeyboardMarkup {
 	var rows [][]InlineKeyboardButton
 	for _, p := range products {
+		status := "✅"
+		if p.TotalStock <= 0 {
+			status = "❌"
+		}
 		rows = append(rows, []InlineKeyboardButton{
-			{Text: fmt.Sprintf("📦 %s", p.Name), CallbackData: fmt.Sprintf("product:%s", p.ID)},
+			{Text: fmt.Sprintf("📦 %s (%s)", p.Name, status), CallbackData: fmt.Sprintf("product:%s", p.ID)},
 		})
 	}
 	rows = append(rows, []InlineKeyboardButton{
+		{Text: "🔄 Làm mới", CallbackData: "products:refresh"},
 		{Text: "🔙 Menu", CallbackData: "back:menu"},
 	})
 	return &InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+// KbNoProducts builds the keyboard when no products are found, with Refresh and Menu on one row.
+func KbNoProducts() *InlineKeyboardMarkup {
+	return &InlineKeyboardMarkup{
+		InlineKeyboard: [][]InlineKeyboardButton{
+			{
+				{Text: "🔄 Làm mới", CallbackData: "products:refresh"},
+				{Text: "🔙 Menu", CallbackData: "back:menu"},
+			},
+		},
+	}
 }
 
 // KbItemList builds the item list keyboard for a product.
@@ -52,26 +69,72 @@ func KbItemList(items []model.ItemWithStock, productID uuid.UUID) *InlineKeyboar
 		})
 	}
 	rows = append(rows, []InlineKeyboardButton{
+		{Text: "🔄 Làm mới", CallbackData: fmt.Sprintf("product:%s", productID)},
 		{Text: "🔙 Quay lại", CallbackData: "back:products"},
 	})
 	return &InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
-// KbItemDetail builds the item detail keyboard with buy buttons.
+// KbItemDetail builds the item detail keyboard with quantity selection buttons matching reference UI.
 func KbItemDetail(itemID uuid.UUID, available int, productID uuid.UUID) *InlineKeyboardMarkup {
 	var rows [][]InlineKeyboardButton
 	if available > 0 {
 		rows = append(rows, []InlineKeyboardButton{
-			{Text: "💳 Mua bằng QR", CallbackData: fmt.Sprintf("buy_qr:%s", itemID)},
+			{Text: "1", CallbackData: fmt.Sprintf("qty:%s:1", itemID)},
+			{Text: "2", CallbackData: fmt.Sprintf("qty:%s:2", itemID)},
 		})
 		rows = append(rows, []InlineKeyboardButton{
-			{Text: "💰 Mua bằng Ví", CallbackData: fmt.Sprintf("buy_wallet:%s", itemID)},
+			{Text: "3", CallbackData: fmt.Sprintf("qty:%s:3", itemID)},
+			{Text: "5", CallbackData: fmt.Sprintf("qty:%s:5", itemID)},
+		})
+		rows = append(rows, []InlineKeyboardButton{
+			{Text: "10", CallbackData: fmt.Sprintf("qty:%s:10", itemID)},
+		})
+		rows = append(rows, []InlineKeyboardButton{
+			{Text: "✏️ Nhập số khác", CallbackData: fmt.Sprintf("qty_custom:%s", itemID)},
 		})
 	}
 	rows = append(rows, []InlineKeyboardButton{
-		{Text: "🔙 Quay lại", CallbackData: fmt.Sprintf("back:product:%s", productID)},
+		{Text: "⬅️ Quay lại", CallbackData: fmt.Sprintf("back:product:%s", productID)},
+		{Text: "❌ Đóng", CallbackData: "close"},
 	})
 	return &InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+// KbConfirmOrder builds the purchase confirmation keyboard for a specific quantity.
+func KbConfirmOrder(itemID uuid.UUID, quantity int, canWallet bool) *InlineKeyboardMarkup {
+	var rows [][]InlineKeyboardButton
+	if canWallet {
+		rows = append(rows, []InlineKeyboardButton{
+			{Text: "💰 Mua bằng Ví (nhanh)", CallbackData: fmt.Sprintf("confirm_buy_wallet:%s:%d", itemID, quantity)},
+		})
+		rows = append(rows, []InlineKeyboardButton{
+			{Text: "💳 Mua bằng QR SePay", CallbackData: fmt.Sprintf("confirm_buy_qr:%s:%d", itemID, quantity)},
+		})
+	} else {
+		rows = append(rows, []InlineKeyboardButton{
+			{Text: "💳 Mua bằng QR SePay", CallbackData: fmt.Sprintf("confirm_buy_qr:%s:%d", itemID, quantity)},
+		})
+		rows = append(rows, []InlineKeyboardButton{
+			{Text: "💵 Nạp tiền vào ví", CallbackData: "wallet"},
+		})
+	}
+	rows = append(rows, []InlineKeyboardButton{
+		{Text: "⬅️ Chọn lại số lượng", CallbackData: fmt.Sprintf("item:%s", itemID)},
+		{Text: "❌ Đóng", CallbackData: "close"},
+	})
+	return &InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+// KbCancel builds a cancel button returning to a specific callback.
+func KbCancel(backCallback string) *InlineKeyboardMarkup {
+	return &InlineKeyboardMarkup{
+		InlineKeyboard: [][]InlineKeyboardButton{
+			{
+				{Text: "❌ Hủy thao tác", CallbackData: backCallback},
+			},
+		},
+	}
 }
 
 // KbConfirmWalletPurchase builds the confirmation keyboard for wallet purchase.
@@ -86,7 +149,7 @@ func KbConfirmWalletPurchase(itemID uuid.UUID) *InlineKeyboardMarkup {
 	}
 }
 
-// KbWallet builds the wallet menu keyboard.
+// KbWallet builds the wallet menu keyboard with custom deposit option.
 func KbWallet() *InlineKeyboardMarkup {
 	return &InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
@@ -97,6 +160,9 @@ func KbWallet() *InlineKeyboardMarkup {
 			{
 				{Text: "💵 Nạp 200.000đ", CallbackData: "deposit:200000"},
 				{Text: "💵 Nạp 500.000đ", CallbackData: "deposit:500000"},
+			},
+			{
+				{Text: "✏️ Nhập số khác", CallbackData: "deposit:custom"},
 			},
 			{{Text: "📜 Lịch sử giao dịch", CallbackData: "wallet:history"}},
 			{{Text: "🔙 Menu", CallbackData: "back:menu"}},

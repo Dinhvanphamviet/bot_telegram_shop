@@ -14,6 +14,7 @@ type Product struct {
 	ImageURL    string    `json:"image_url"`
 	IsActive    bool      `json:"is_active"`
 	SortOrder   int       `json:"sort_order"`
+	TotalStock  int       `json:"total_stock"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

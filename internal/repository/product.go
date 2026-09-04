@@ -24,9 +24,15 @@ func NewProductRepo(db *pgxpool.Pool) *ProductRepo {
 // FindAllActive returns all active products sorted by sort_order.
 func (r *ProductRepo) FindAllActive(ctx context.Context) ([]model.Product, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id, name, description, image_url, is_active, sort_order, created_at, updated_at
-		 FROM products WHERE is_active = true
-		 ORDER BY sort_order ASC, created_at ASC`)
+		`SELECT p.id, p.name, p.description, p.image_url, p.is_active, p.sort_order,
+		        COALESCE((
+		            SELECT COUNT(*) FROM product_links pl
+		            JOIN items i ON pl.item_id = i.id
+		            WHERE i.product_id = p.id AND i.is_active = true AND pl.status = 'AVAILABLE'
+		        ), 0) AS total_stock,
+		        p.created_at, p.updated_at
+		 FROM products p WHERE p.is_active = true
+		 ORDER BY p.sort_order ASC, p.created_at ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +41,7 @@ func (r *ProductRepo) FindAllActive(ctx context.Context) ([]model.Product, error
 	var products []model.Product
 	for rows.Next() {
 		var p model.Product
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.ImageURL, &p.IsActive, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.ImageURL, &p.IsActive, &p.SortOrder, &p.TotalStock, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		products = append(products, p)
@@ -46,8 +52,14 @@ func (r *ProductRepo) FindAllActive(ctx context.Context) ([]model.Product, error
 // FindAll returns all products (admin).
 func (r *ProductRepo) FindAll(ctx context.Context) ([]model.Product, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id, name, description, image_url, is_active, sort_order, created_at, updated_at
-		 FROM products ORDER BY sort_order ASC, created_at ASC`)
+		`SELECT p.id, p.name, p.description, p.image_url, p.is_active, p.sort_order,
+		        COALESCE((
+		            SELECT COUNT(*) FROM product_links pl
+		            JOIN items i ON pl.item_id = i.id
+		            WHERE i.product_id = p.id AND i.is_active = true AND pl.status = 'AVAILABLE'
+		        ), 0) AS total_stock,
+		        p.created_at, p.updated_at
+		 FROM products p ORDER BY p.sort_order ASC, p.created_at ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +68,7 @@ func (r *ProductRepo) FindAll(ctx context.Context) ([]model.Product, error) {
 	var products []model.Product
 	for rows.Next() {
 		var p model.Product
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.ImageURL, &p.IsActive, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.ImageURL, &p.IsActive, &p.SortOrder, &p.TotalStock, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		products = append(products, p)
@@ -68,9 +80,15 @@ func (r *ProductRepo) FindAll(ctx context.Context) ([]model.Product, error) {
 func (r *ProductRepo) FindByID(ctx context.Context, id uuid.UUID) (*model.Product, error) {
 	var p model.Product
 	err := r.db.QueryRow(ctx,
-		`SELECT id, name, description, image_url, is_active, sort_order, created_at, updated_at
-		 FROM products WHERE id = $1`, id,
-	).Scan(&p.ID, &p.Name, &p.Description, &p.ImageURL, &p.IsActive, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt)
+		`SELECT p.id, p.name, p.description, p.image_url, p.is_active, p.sort_order,
+		        COALESCE((
+		            SELECT COUNT(*) FROM product_links pl
+		            JOIN items i ON pl.item_id = i.id
+		            WHERE i.product_id = p.id AND i.is_active = true AND pl.status = 'AVAILABLE'
+		        ), 0) AS total_stock,
+		        p.created_at, p.updated_at
+		 FROM products p WHERE p.id = $1`, id,
+	).Scan(&p.ID, &p.Name, &p.Description, &p.ImageURL, &p.IsActive, &p.SortOrder, &p.TotalStock, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

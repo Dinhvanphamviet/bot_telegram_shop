@@ -54,7 +54,11 @@ func NewOrderService(
 
 // PurchaseWithBalance processes a purchase using wallet balance.
 // Everything runs in a single transaction for atomicity.
-func (s *OrderService) PurchaseWithBalance(ctx context.Context, userID, itemID uuid.UUID) (*model.Order, *model.ProductLink, error) {
+func (s *OrderService) PurchaseWithBalance(ctx context.Context, userID, itemID uuid.UUID, quantity int) (*model.Order, []model.ProductLink, error) {
+	if quantity <= 0 {
+		quantity = 1
+	}
+
 	// Get item info
 	item, err := s.itemRepo.FindByID(ctx, itemID)
 	if err != nil {
@@ -64,13 +68,23 @@ func (s *OrderService) PurchaseWithBalance(ctx context.Context, userID, itemID u
 		return nil, nil, errors.New("sản phẩm không tồn tại hoặc đã ngừng bán")
 	}
 
+	count, err := s.itemRepo.CountAvailableLinks(ctx, itemID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("count links: %w", err)
+	}
+	if count < quantity {
+		return nil, nil, fmt.Errorf("sản phẩm hiện chỉ còn %d trong kho, không đủ số lượng yêu cầu (%d)", count, quantity)
+	}
+
+	totalAmount := item.Price * int64(quantity)
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	_, err = s.userRepo.UpdateBalance(ctx, tx, userID, -item.Price)
+	_, err = s.userRepo.UpdateBalance(ctx, tx, userID, -totalAmount)
 	if err != nil {
 		return nil, nil, fmt.Errorf("số dư không đủ để thanh toán")
 	}
@@ -78,7 +92,8 @@ func (s *OrderService) PurchaseWithBalance(ctx context.Context, userID, itemID u
 	order := &model.Order{
 		UserID:        userID,
 		ItemID:        itemID,
-		Amount:        item.Price,
+		Amount:        totalAmount,
+		Quantity:      quantity,
 		Status:        model.OrderStatusPaid,
 		PaymentMethod: model.PaymentMethodWallet,
 	}
@@ -86,31 +101,36 @@ func (s *OrderService) PurchaseWithBalance(ctx context.Context, userID, itemID u
 		return nil, nil, fmt.Errorf("create order: %w", err)
 	}
 
-	// Lock and claim single available link
-	link, err := s.productLinkRepo.ClaimLink(ctx, tx, itemID)
+	// Lock and claim requested number of links
+	links, err := s.productLinkRepo.ClaimLinks(ctx, tx, itemID, quantity)
 	if err != nil {
-		return nil, nil, fmt.Errorf("claim link: %w", err)
+		return nil, nil, fmt.Errorf("claim links: %w", err)
 	}
-	if link == nil {
+	if len(links) < quantity {
 		// Out of stock rollback
-		_, _ = s.userRepo.UpdateBalance(ctx, tx, userID, item.Price)
-		return nil, nil, errors.New("sản phẩm đã hết hàng, số tiền đã được hoàn lại")
+		_, _ = s.userRepo.UpdateBalance(ctx, tx, userID, totalAmount)
+		return nil, nil, errors.New("sản phẩm đã hết hoặc không đủ hàng, số tiền đã được hoàn lại")
 	}
 
-	if err := s.productLinkRepo.AssignLink(ctx, tx, link.ID, userID, order.ID); err != nil {
-		return nil, nil, fmt.Errorf("assign link: %w", err)
+	linkIDs := make([]uuid.UUID, len(links))
+	for i, l := range links {
+		linkIDs[i] = l.ID
 	}
 
-	if err := s.orderRepo.SetProductLink(ctx, tx, order.ID, link.ID); err != nil {
+	if err := s.productLinkRepo.AssignLinks(ctx, tx, linkIDs, userID, order.ID); err != nil {
+		return nil, nil, fmt.Errorf("assign links: %w", err)
+	}
+
+	if err := s.orderRepo.SetProductLink(ctx, tx, order.ID, links[0].ID); err != nil {
 		return nil, nil, fmt.Errorf("set product link: %w", err)
 	}
 
 	wt := &model.WalletTransaction{
 		UserID:      userID,
-		Amount:      -item.Price,
+		Amount:      -totalAmount,
 		Type:        model.WalletTypePurchase,
 		Status:      "SUCCESS",
-		Description: fmt.Sprintf("Mua %s", item.Name),
+		Description: fmt.Sprintf("Mua %s (x%d)", item.Name, quantity),
 		ReferenceID: order.ID.String(),
 	}
 	if err := s.walletRepo.Create(ctx, tx, wt); err != nil {
@@ -121,12 +141,16 @@ func (s *OrderService) PurchaseWithBalance(ctx context.Context, userID, itemID u
 		return nil, nil, fmt.Errorf("commit: %w", err)
 	}
 
-	log.Printf("Purchase completed: order=%s, item=%s, link=%s", order.ID, itemID, link.ID)
-	return order, link, nil
+	log.Printf("Purchase completed: order=%s, item=%s, quantity=%d, amount=%d", order.ID, itemID, quantity, totalAmount)
+	return order, links, nil
 }
 
 // PurchaseWithQR creates a pending order and returns a QR payment URL.
-func (s *OrderService) PurchaseWithQR(ctx context.Context, userID, itemID uuid.UUID) (*model.Order, *model.Payment, string, error) {
+func (s *OrderService) PurchaseWithQR(ctx context.Context, userID, itemID uuid.UUID, quantity int) (*model.Order, *model.Payment, string, error) {
+	if quantity <= 0 {
+		quantity = 1
+	}
+
 	item, err := s.itemRepo.FindByID(ctx, itemID)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("find item: %w", err)
@@ -139,14 +163,17 @@ func (s *OrderService) PurchaseWithQR(ctx context.Context, userID, itemID uuid.U
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("count links: %w", err)
 	}
-	if count == 0 {
-		return nil, nil, "", errors.New("sản phẩm đã hết hàng")
+	if count < quantity {
+		return nil, nil, "", fmt.Errorf("sản phẩm chỉ còn %d trong kho, không đủ số lượng yêu cầu (%d)", count, quantity)
 	}
+
+	totalAmount := item.Price * int64(quantity)
 
 	order := &model.Order{
 		UserID:        userID,
 		ItemID:        itemID,
-		Amount:        item.Price,
+		Amount:        totalAmount,
+		Quantity:      quantity,
 		Status:        model.OrderStatusPending,
 		PaymentMethod: model.PaymentMethodQR,
 	}
@@ -156,13 +183,13 @@ func (s *OrderService) PurchaseWithQR(ctx context.Context, userID, itemID uuid.U
 
 	shortID := strings.ToUpper(order.ID.String()[:8])
 	transferContent := sepay.GenerateTransferContent(shortID)
-	qrURL := sepay.GenerateQRURL(s.cfg.SepayBankCode, s.cfg.SepayAccountNumber, item.Price, transferContent)
+	qrURL := sepay.GenerateQRURL(s.cfg.SepayBankCode, s.cfg.SepayAccountNumber, totalAmount, transferContent)
 
 	payment := &model.Payment{
 		OrderID:         &order.ID,
 		UserID:          userID,
 		Provider:        "SEPAY",
-		Amount:          item.Price,
+		Amount:          totalAmount,
 		Status:          model.PaymentStatusPending,
 		QRURL:           qrURL,
 		TransferContent: transferContent,
@@ -173,7 +200,7 @@ func (s *OrderService) PurchaseWithQR(ctx context.Context, userID, itemID uuid.U
 		return nil, nil, "", fmt.Errorf("create payment: %w", err)
 	}
 
-	log.Printf("QR payment created: order=%s, payment=%s, content=%s", order.ID, payment.ID, transferContent)
+	log.Printf("QR payment created: order=%s, payment=%s, quantity=%d, content=%s", order.ID, payment.ID, quantity, transferContent)
 	return order, payment, qrURL, nil
 }
 

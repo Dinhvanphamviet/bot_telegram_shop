@@ -114,6 +114,30 @@ func (b *Bot) EditMessageText(chatID int64, messageID int64, text string, keyboa
 	return b.callAPI("editMessageText", params)
 }
 
+// DeleteMessage deletes a message in a chat.
+func (b *Bot) DeleteMessage(chatID int64, messageID int64) error {
+	params := map[string]interface{}{
+		"chat_id":    chatID,
+		"message_id": messageID,
+	}
+	return b.callAPI("deleteMessage", params)
+}
+
+// DeleteMessages deletes multiple messages in a chat simultaneously (up to 100 messages).
+func (b *Bot) DeleteMessages(chatID int64, messageIDs []int64) error {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+	if len(messageIDs) > 100 {
+		messageIDs = messageIDs[:100]
+	}
+	params := map[string]interface{}{
+		"chat_id":     chatID,
+		"message_ids": messageIDs,
+	}
+	return b.callAPI("deleteMessages", params)
+}
+
 // AnswerCallbackQuery answers a callback query.
 func (b *Bot) AnswerCallbackQuery(callbackQueryID, text string) error {
 	params := map[string]interface{}{

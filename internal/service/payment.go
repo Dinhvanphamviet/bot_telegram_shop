@@ -48,6 +48,7 @@ type PaymentResult struct {
 	Payment     *model.Payment
 	Order       *model.Order
 	Link        *model.ProductLink
+	Links       []model.ProductLink
 	UserID      uuid.UUID
 	Success     bool
 	NeedsRefund bool
@@ -142,14 +143,19 @@ func (s *PaymentService) processOrderPayment(ctx context.Context, payment *model
 		return nil, fmt.Errorf("update payment: %w", err)
 	}
 
-	link, err := s.productLinkRepo.ClaimLink(ctx, tx, order.ItemID)
-	if err != nil {
-		return nil, fmt.Errorf("claim link: %w", err)
+	qty := order.Quantity
+	if qty <= 0 {
+		qty = 1
 	}
 
-	if link == nil {
+	links, err := s.productLinkRepo.ClaimLinks(ctx, tx, order.ItemID, qty)
+	if err != nil {
+		return nil, fmt.Errorf("claim links: %w", err)
+	}
+
+	if len(links) < qty {
 		// Out of stock refund to wallet
-		log.Printf("Out of stock for item %s, refunding order %s", order.ItemID, order.ID)
+		log.Printf("Out of stock for item %s (requested %d, claimed %d), refunding order %s", order.ItemID, qty, len(links), order.ID)
 
 		if err := s.orderRepo.UpdateStatus(ctx, tx, order.ID, model.OrderStatusCancelled); err != nil {
 			return nil, fmt.Errorf("cancel order: %w", err)
@@ -181,15 +187,20 @@ func (s *PaymentService) processOrderPayment(ctx context.Context, payment *model
 			UserID:      payment.UserID,
 			Success:     false,
 			NeedsRefund: true,
-			Message:     fmt.Sprintf("Sản phẩm đã hết hàng. Đã hoàn %s vào ví của bạn.", formatMoney(order.Amount)),
+			Message:     fmt.Sprintf("Sản phẩm không đủ hàng trong kho. Đã hoàn %s vào ví của bạn.", formatMoney(order.Amount)),
 		}, nil
 	}
 
-	if err := s.productLinkRepo.AssignLink(ctx, tx, link.ID, order.UserID, order.ID); err != nil {
-		return nil, fmt.Errorf("assign link: %w", err)
+	linkIDs := make([]uuid.UUID, len(links))
+	for i, l := range links {
+		linkIDs[i] = l.ID
 	}
 
-	if err := s.orderRepo.SetProductLink(ctx, tx, order.ID, link.ID); err != nil {
+	if err := s.productLinkRepo.AssignLinks(ctx, tx, linkIDs, order.UserID, order.ID); err != nil {
+		return nil, fmt.Errorf("assign links: %w", err)
+	}
+
+	if err := s.orderRepo.SetProductLink(ctx, tx, order.ID, links[0].ID); err != nil {
 		return nil, fmt.Errorf("set link on order: %w", err)
 	}
 	if err := s.orderRepo.UpdateStatus(ctx, tx, order.ID, model.OrderStatusPaid); err != nil {
@@ -200,11 +211,12 @@ func (s *PaymentService) processOrderPayment(ctx context.Context, payment *model
 		return nil, fmt.Errorf("commit: %w", err)
 	}
 
-	log.Printf("Order payment completed: payment=%s, order=%s, link=%s", payment.ID, order.ID, link.ID)
+	log.Printf("Order payment completed: payment=%s, order=%s, quantity=%d", payment.ID, order.ID, qty)
 	return &PaymentResult{
 		Payment: payment,
 		Order:   order,
-		Link:    link,
+		Link:    &links[0],
+		Links:   links,
 		UserID:  payment.UserID,
 		Success: true,
 		Message: "Thanh toán thành công!",
@@ -254,12 +266,22 @@ func (s *PaymentService) processDepositPayment(ctx context.Context, payment *mod
 	}, nil
 }
 
+// ExpiredPaymentNotification holds information to notify a user about an expired payment.
+type ExpiredPaymentNotification struct {
+	TelegramID      int64
+	TransferContent string
+	Amount          int64
+	PaymentType     string
+}
+
 // ExpirePendingPayments expires all pending payments past their deadline.
-func (s *PaymentService) ExpirePendingPayments(ctx context.Context) error {
+func (s *PaymentService) ExpirePendingPayments(ctx context.Context) ([]ExpiredPaymentNotification, error) {
 	expired, err := s.paymentRepo.FindPendingExpired(ctx)
 	if err != nil {
-		return fmt.Errorf("find expired: %w", err)
+		return nil, fmt.Errorf("find expired: %w", err)
 	}
+
+	var notifications []ExpiredPaymentNotification
 
 	for _, p := range expired {
 		if err := s.paymentRepo.ExpirePayment(ctx, p.ID); err != nil {
@@ -267,7 +289,6 @@ func (s *PaymentService) ExpirePendingPayments(ctx context.Context) error {
 			continue
 		}
 
-		// Also expire the associated order
 		if p.OrderID != nil && p.PaymentType == model.PaymentTypeOrder {
 			tx, err := s.db.Begin(ctx)
 			if err != nil {
@@ -282,13 +303,23 @@ func (s *PaymentService) ExpirePendingPayments(ctx context.Context) error {
 			tx.Commit(ctx)
 		}
 
-		log.Printf("Expired payment: %s", p.ID)
+		user, err := s.userRepo.FindByID(ctx, p.UserID)
+		if err == nil && user != nil && user.TelegramID > 0 {
+			notifications = append(notifications, ExpiredPaymentNotification{
+				TelegramID:      user.TelegramID,
+				TransferContent: p.TransferContent,
+				Amount:          p.Amount,
+				PaymentType:     p.PaymentType,
+			})
+		}
+
+		log.Printf("Expired payment: %s (%s)", p.ID, p.TransferContent)
 	}
 
 	if len(expired) > 0 {
 		log.Printf("Expired %d pending payments", len(expired))
 	}
-	return nil
+	return notifications, nil
 }
 
 // extractTransferContent extracts our transfer content code from the bank transfer description.

@@ -6,9 +6,9 @@ import (
 )
 
 // handleAdmin handles the /admin command.
-func (h *CommandHandler) handleAdmin(ctx context.Context, msg *Message) {
+func (h *CommandHandler) handleAdmin(_ context.Context, msg *Message) {
 	if msg.From == nil || !h.cfg.IsAdmin(msg.From.ID) {
-		h.bot.SendMessage(msg.Chat.ID, "⛔ Bạn không có quyền truy cập.", nil)
+		h.bot.SendMessage(msg.Chat.ID, "⛔ <b>Bạn không có quyền truy cập.</b>", nil)
 		return
 	}
 	h.bot.SendMessage(msg.Chat.ID, "🔧 <b>Admin Panel</b>\n\nChọn chức năng:", KbAdminMenu())

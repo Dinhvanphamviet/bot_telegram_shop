@@ -44,6 +44,37 @@ func (r *ProductLinkRepo) ClaimLink(ctx context.Context, tx pgx.Tx, itemID uuid.
 	return &pl, nil
 }
 
+// ClaimLinks claims multiple available links for an item using row-level locking.
+// Uses FOR UPDATE SKIP LOCKED to prevent duplicate selling.
+// Must be called within a transaction.
+func (r *ProductLinkRepo) ClaimLinks(ctx context.Context, tx pgx.Tx, itemID uuid.UUID, limit int) ([]model.ProductLink, error) {
+	if limit <= 0 {
+		limit = 1
+	}
+	rows, err := tx.Query(ctx,
+		`SELECT id, item_id, link, status, created_at
+		 FROM product_links
+		 WHERE item_id = $1 AND status = 'AVAILABLE'
+		 ORDER BY created_at ASC
+		 LIMIT $2
+		 FOR UPDATE SKIP LOCKED`, itemID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var links []model.ProductLink
+	for rows.Next() {
+		var pl model.ProductLink
+		if err := rows.Scan(&pl.ID, &pl.ItemID, &pl.Link, &pl.Status, &pl.CreatedAt); err != nil {
+			return nil, err
+		}
+		links = append(links, pl)
+	}
+	return links, rows.Err()
+}
+
 // AssignLink marks a link as SOLD and assigns it to a user/order.
 // Must be called within a transaction.
 func (r *ProductLinkRepo) AssignLink(ctx context.Context, tx pgx.Tx, linkID, userID, orderID uuid.UUID) error {
@@ -53,6 +84,21 @@ func (r *ProductLinkRepo) AssignLink(ctx context.Context, tx pgx.Tx, linkID, use
 		 SET status = 'SOLD', assigned_user_id = $1, order_id = $2, assigned_at = $3
 		 WHERE id = $4`,
 		userID, orderID, now, linkID)
+	return err
+}
+
+// AssignLinks marks multiple links as SOLD and assigns them to a user/order.
+// Must be called within a transaction.
+func (r *ProductLinkRepo) AssignLinks(ctx context.Context, tx pgx.Tx, linkIDs []uuid.UUID, userID, orderID uuid.UUID) error {
+	if len(linkIDs) == 0 {
+		return nil
+	}
+	now := time.Now()
+	_, err := tx.Exec(ctx,
+		`UPDATE product_links
+		 SET status = 'SOLD', assigned_user_id = $1, order_id = $2, assigned_at = $3
+		 WHERE id = ANY($4)`,
+		userID, orderID, now, linkIDs)
 	return err
 }
 
@@ -70,6 +116,27 @@ func (r *ProductLinkRepo) FindByOrderID(ctx context.Context, orderID uuid.UUID) 
 		return nil, err
 	}
 	return &pl, nil
+}
+
+// FindLinksByOrderID returns all links assigned to an order.
+func (r *ProductLinkRepo) FindLinksByOrderID(ctx context.Context, orderID uuid.UUID) ([]model.ProductLink, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT id, item_id, link, status, assigned_user_id, order_id, assigned_at, created_at
+		 FROM product_links WHERE order_id = $1 ORDER BY assigned_at ASC`, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var links []model.ProductLink
+	for rows.Next() {
+		var pl model.ProductLink
+		if err := rows.Scan(&pl.ID, &pl.ItemID, &pl.Link, &pl.Status, &pl.AssignedUserID, &pl.OrderID, &pl.AssignedAt, &pl.CreatedAt); err != nil {
+			return nil, err
+		}
+		links = append(links, pl)
+	}
+	return links, rows.Err()
 }
 
 // Create inserts a new product link.

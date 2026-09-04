@@ -27,7 +27,8 @@ type Order struct {
 	ItemID        uuid.UUID  `json:"item_id"`
 	ProductLinkID *uuid.UUID `json:"product_link_id,omitempty"`
 	Amount        int64      `json:"amount"`
-	Status        string     `json:"status"` // PENDING, PAID, CANCELLED, EXPIRED
+	Quantity      int        `json:"quantity"`
+	Status        string     `json:"status"`         // PENDING, PAID, CANCELLED, EXPIRED
 	PaymentMethod string     `json:"payment_method"` // QR, WALLET
 	CreatedAt     time.Time  `json:"created_at"`
 	CompletedAt   *time.Time `json:"completed_at,omitempty"`
@@ -36,7 +37,8 @@ type Order struct {
 // OrderDetail includes related info for display.
 type OrderDetail struct {
 	Order
-	ItemName    string `json:"item_name"`
-	ProductName string `json:"product_name"`
-	Link        string `json:"link,omitempty"`
+	ItemName    string   `json:"item_name"`
+	ProductName string   `json:"product_name"`
+	Link        string   `json:"link,omitempty"`
+	Links       []string `json:"links,omitempty"`
 }

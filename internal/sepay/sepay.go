@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/url"
+	"strings"
 )
 
 // WebhookPayload represents the data SePay sends via webhook.
@@ -27,6 +28,9 @@ type WebhookPayload struct {
 // GenerateQRURL creates a VietQR payment URL for SePay.
 // The URL returns a QR code image that can be sent directly to users.
 func GenerateQRURL(bankCode, accountNumber string, amount int64, content string) string {
+	if strings.ToUpper(bankCode) == "MBB" {
+		bankCode = "MBBank"
+	}
 	return fmt.Sprintf(
 		"https://qr.sepay.vn/img?acc=%s&bank=%s&amount=%d&des=%s",
 		url.QueryEscape(accountNumber),

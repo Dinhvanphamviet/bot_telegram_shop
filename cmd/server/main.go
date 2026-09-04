@@ -64,9 +64,10 @@ func main() {
 	paymentService := service.NewPaymentService(dbPool, paymentRepo, orderRepo, userRepo, productLinkRepo, walletRepo)
 	walletService := service.NewWalletService(dbPool, cfg, userRepo, walletRepo, paymentRepo)
 
+	stateManager := bot.NewStateManager()
 	telegramBot := bot.NewBot(cfg.TelegramBotToken)
-	commandHandler := bot.NewCommandHandler(telegramBot, cfg, userService, productService, orderService, walletService)
-	callbackHandler := bot.NewCallbackHandler(telegramBot, cfg, userService, productService, orderService, walletService)
+	commandHandler := bot.NewCommandHandler(telegramBot, cfg, userService, productService, orderService, walletService, stateManager)
+	callbackHandler := bot.NewCallbackHandler(telegramBot, cfg, userService, productService, orderService, walletService, stateManager)
 
 	telegramHandler := handler.NewTelegramHandler(telegramBot, cfg, commandHandler, callbackHandler, paymentService, userService)
 	adminHandler := handler.NewAdminHandler(productService, orderService, walletService, userService)
@@ -92,13 +93,18 @@ func main() {
 		log.Printf("✅ Webhook set: %s", webhookURL)
 	}
 
-	// Background job: expire pending payments every minute
+	// Background job: expire pending payments every minute and notify users
 	go func() {
 		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
-			if err := paymentService.ExpirePendingPayments(context.Background()); err != nil {
+			expiredList, err := paymentService.ExpirePendingPayments(context.Background())
+			if err != nil {
 				log.Printf("Error expiring payments: %v", err)
+				continue
+			}
+			for _, exp := range expiredList {
+				telegramBot.SendMessage(exp.TelegramID, bot.MsgPaymentExpired(exp.TransferContent), bot.KbBackToMenu())
 			}
 		}
 	}()
@@ -141,6 +147,11 @@ func runMigrations(ctx context.Context, db *pgxpool.Pool) error {
 	if err != nil {
 		// Migration may fail if tables already exist — that's OK
 		log.Printf("Migration note (may be normal if tables exist): %v", err)
+	}
+
+	// Always ensure recent schema alterations are applied to live DB
+	if _, err := db.Exec(ctx, "ALTER TABLE orders ADD COLUMN IF NOT EXISTS quantity INT NOT NULL DEFAULT 1;"); err != nil {
+		log.Printf("Warning executing schema update (quantity column): %v", err)
 	}
 	return nil
 }
