@@ -71,10 +71,14 @@ func (r *PaymentRepo) FindByOrderID(ctx context.Context, orderID uuid.UUID) (*mo
 
 // UpdateStatusTx updates payment status within a transaction.
 func (r *PaymentRepo) UpdateStatusTx(ctx context.Context, tx pgx.Tx, paymentID uuid.UUID, status, providerTxID string) error {
+	if status == model.PaymentStatusSuccess {
+		_, err := tx.Exec(ctx,
+			`UPDATE payments SET status = $1, provider_transaction_id = $2, paid_at = NOW() WHERE id = $3`,
+			status, providerTxID, paymentID)
+		return err
+	}
 	_, err := tx.Exec(ctx,
-		`UPDATE payments SET status = $1, provider_transaction_id = $2,
-		        paid_at = CASE WHEN $1 = 'SUCCESS' THEN NOW() ELSE paid_at END
-		 WHERE id = $3`,
+		`UPDATE payments SET status = $1, provider_transaction_id = $2 WHERE id = $3`,
 		status, providerTxID, paymentID)
 	return err
 }

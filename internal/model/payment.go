@@ -26,7 +26,7 @@ type Payment struct {
 	OrderID               *uuid.UUID `json:"order_id,omitempty"`
 	UserID                uuid.UUID  `json:"user_id"`
 	Provider              string     `json:"provider"`
-	ProviderTransactionID string     `json:"provider_transaction_id,omitempty"`
+	ProviderTransactionID *string    `json:"provider_transaction_id,omitempty"`
 	Amount                int64      `json:"amount"`
 	Status                string     `json:"status"` // PENDING, SUCCESS, FAILED, EXPIRED
 	QRURL                 string     `json:"qr_url,omitempty"`
