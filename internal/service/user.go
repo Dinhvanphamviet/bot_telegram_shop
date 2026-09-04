@@ -53,3 +53,8 @@ func (s *UserService) GetUserByID(ctx context.Context, id uuid.UUID) (*model.Use
 	return s.userRepo.FindByID(ctx, id)
 }
 
+// GetAllTelegramIDs returns all registered Telegram IDs.
+func (s *UserService) GetAllTelegramIDs(ctx context.Context) ([]int64, error) {
+	return s.userRepo.FindAllTelegramIDs(ctx)
+}
+

@@ -86,3 +86,22 @@ func (r *UserRepo) GetBalance(ctx context.Context, userID uuid.UUID) (int64, err
 	err := r.db.QueryRow(ctx, `SELECT balance FROM users WHERE id = $1`, userID).Scan(&balance)
 	return balance, err
 }
+
+// FindAllTelegramIDs returns all active user telegram IDs.
+func (r *UserRepo) FindAllTelegramIDs(ctx context.Context) ([]int64, error) {
+	rows, err := r.db.Query(ctx, `SELECT telegram_id FROM users WHERE telegram_id > 0`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}

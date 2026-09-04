@@ -1,11 +1,15 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
+	"telegram-shop/internal/bot"
 	"telegram-shop/internal/model"
 	"telegram-shop/internal/service"
 
@@ -15,6 +19,7 @@ import (
 
 // AdminHandler handles admin REST API requests.
 type AdminHandler struct {
+	bot            *bot.Bot
 	productService *service.ProductService
 	orderService   *service.OrderService
 	walletService  *service.WalletService
@@ -23,12 +28,14 @@ type AdminHandler struct {
 
 // NewAdminHandler creates a new AdminHandler.
 func NewAdminHandler(
+	bot *bot.Bot,
 	productService *service.ProductService,
 	orderService *service.OrderService,
 	walletService *service.WalletService,
 	userService *service.UserService,
 ) *AdminHandler {
 	return &AdminHandler{
+		bot:            bot,
 		productService: productService,
 		orderService:   orderService,
 		walletService:  walletService,
@@ -221,6 +228,10 @@ func (h *AdminHandler) CreateLinks(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Tự động thông báo tới toàn bộ người dùng khi admin nạp thêm link vào kho
+	go h.notifyUsersStockRestocked(req.ItemID, count)
+
 	jsonResponse(w, map[string]interface{}{
 		"status":  "created",
 		"created": count,
@@ -299,4 +310,58 @@ func jsonError(w http.ResponseWriter, message string, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
+// notifyUsersStockRestocked broadcasts a restock notification to all users.
+func (h *AdminHandler) notifyUsersStockRestocked(itemID uuid.UUID, addedCount int) {
+	ctx := context.Background()
+	item, availableCount, err := h.productService.GetItemDetail(ctx, itemID)
+	if err != nil || item == nil {
+		log.Printf("Cannot find item %s for restock notification: %v", itemID, err)
+		return
+	}
+
+	product, _ := h.productService.GetProduct(ctx, item.ProductID)
+	productName := item.Name
+	if product != nil {
+		productName = fmt.Sprintf("%s — %s", product.Name, item.Name)
+	}
+
+	userIDs, err := h.userService.GetAllTelegramIDs(ctx)
+	if err != nil {
+		log.Printf("Error fetching users for restock notification: %v", err)
+		return
+	}
+
+	text := fmt.Sprintf("📢 <b>THÔNG BÁO: HÀNG MỚI VỀ KHO!</b>\n"+
+		"───────────────────\n"+
+		"📦 <b>Sản phẩm:</b> %s\n"+
+		"🔢 <b>Vừa nhập thêm:</b> +%d sản phẩm\n"+
+		"📊 <b>Tổng tồn kho hiện tại:</b> %d\n"+
+		"💵 <b>Đơn giá:</b> %s\n"+
+		"───────────────────\n"+
+		"⚡ <i>Số lượng có hạn, hãy nhanh tay đặt mua ngay kẻo hết nhé!</i>",
+		productName, addedCount, availableCount, bot.FormatMoney(item.Price),
+	)
+
+	kb := &bot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]bot.InlineKeyboardButton{
+			{
+				{Text: "🛒 Xem & Mua ngay", CallbackData: fmt.Sprintf("item:%s", item.ID)},
+			},
+			{
+				{Text: "🛍 Danh sách sản phẩm", CallbackData: "products"},
+			},
+		},
+	}
+
+	sentCount := 0
+	for _, tgID := range userIDs {
+		if err := h.bot.SendMessage(tgID, text, kb); err == nil {
+			sentCount++
+		}
+		// Rate limit: sleep 40ms (~25 messages/sec) to stay well within Telegram limits
+		time.Sleep(40 * time.Millisecond)
+	}
+	log.Printf("Restock notification sent to %d/%d users for item %s (+%d links)", sentCount, len(userIDs), itemID, addedCount)
 }

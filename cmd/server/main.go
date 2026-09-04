@@ -70,7 +70,7 @@ func main() {
 	callbackHandler := bot.NewCallbackHandler(telegramBot, cfg, userService, productService, orderService, walletService, stateManager)
 
 	telegramHandler := handler.NewTelegramHandler(telegramBot, cfg, commandHandler, callbackHandler, paymentService, userService)
-	adminHandler := handler.NewAdminHandler(productService, orderService, walletService, userService)
+	adminHandler := handler.NewAdminHandler(telegramBot, productService, orderService, walletService, userService)
 
 	r := chi.NewRouter()
 	r.Use(chiMiddleware.Logger)
