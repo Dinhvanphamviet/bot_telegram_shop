@@ -270,9 +270,9 @@ func MsgItemDetail(productName, itemName, description string, shortID string, pr
 	sb.WriteString(fmt.Sprintf("💵 Giá bán: <b>%s</b>\n", FormatMoney(price)))
 
 	if stock > 0 {
-		sb.WriteString(fmt.Sprintf("📦 Tồn kho: <b>%d</b>\n", stock))
+		sb.WriteString(fmt.Sprintf("📦 Tồn kho: ✅ <b>%d</b>\n", stock))
 	} else {
-		sb.WriteString("📦 Tồn kho: 🔴 <b>Hết hàng</b>\n")
+		sb.WriteString("📦 Tồn kho: ❌ <b>Hết hàng</b>\n")
 	}
 
 	sb.WriteString(fmt.Sprintf("💰 Số dư ví: <b>%s</b>\n", FormatMoney(balance)))

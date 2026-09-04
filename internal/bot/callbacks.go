@@ -93,7 +93,7 @@ func (h *CallbackHandler) HandleCallback(ctx context.Context, cb *CallbackQuery)
 
 	case strings.HasPrefix(data, "product:"):
 		h.stateManager.Clear(cb.From.ID)
-		h.handleProductDetail(ctx, chatID, msgID, data[8:])
+		h.handleProductDetail(ctx, chatID, msgID, user.ID, data[8:])
 
 	case strings.HasPrefix(data, "item:"):
 		h.stateManager.Clear(cb.From.ID)
@@ -163,7 +163,7 @@ func (h *CallbackHandler) HandleCallback(ctx context.Context, cb *CallbackQuery)
 
 	case strings.HasPrefix(data, "back:product:"):
 		h.stateManager.Clear(cb.From.ID)
-		h.handleProductDetail(ctx, chatID, msgID, data[13:])
+		h.handleProductDetail(ctx, chatID, msgID, user.ID, data[13:])
 
 	case strings.HasPrefix(data, "admin:"):
 		if !h.cfg.IsAdmin(cb.From.ID) {
@@ -188,7 +188,7 @@ func (h *CallbackHandler) handleProducts(ctx context.Context, chatID, msgID int6
 	h.bot.EditMessageText(chatID, msgID, MsgProductList(), KbProductList(products))
 }
 
-func (h *CallbackHandler) handleProductDetail(ctx context.Context, chatID, msgID int64, idStr string) {
+func (h *CallbackHandler) handleProductDetail(ctx context.Context, chatID, msgID int64, userID uuid.UUID, idStr string) {
 	productID, err := uuid.Parse(idStr)
 	if err != nil {
 		h.bot.EditMessageText(chatID, msgID, MsgError(), KbBackToMenu())
@@ -199,6 +199,12 @@ func (h *CallbackHandler) handleProductDetail(ctx context.Context, chatID, msgID
 	if err != nil || product == nil {
 		log.Printf("Error getting product: %v", err)
 		h.bot.EditMessageText(chatID, msgID, MsgError(), KbBackToMenu())
+		return
+	}
+
+	// Nếu sản phẩm chỉ có đúng 1 gói duy nhất: Bỏ qua màn hình trung gian, nhảy thẳng vào chi tiết và chọn số lượng!
+	if len(items) == 1 {
+		h.handleItemDetail(ctx, chatID, msgID, userID, items[0].ID.String())
 		return
 	}
 
@@ -229,7 +235,7 @@ func (h *CallbackHandler) handleItemDetail(ctx context.Context, chatID, msgID in
 		return
 	}
 
-	product, _ := h.productService.GetProduct(ctx, item.ProductID)
+	product, items, _ := h.productService.GetProductWithItems(ctx, item.ProductID)
 	productName := ""
 	if product != nil {
 		productName = product.Name
@@ -238,8 +244,14 @@ func (h *CallbackHandler) handleItemDetail(ctx context.Context, chatID, msgID in
 	balance, _ := h.walletService.GetBalance(ctx, userID)
 	shortID := strings.ToUpper(item.ID.String()[:4])
 
+	// Nếu sản phẩm chỉ có 1 gói duy nhất thì nút Quay lại sẽ về thẳng danh sách sản phẩm
+	backCallback := fmt.Sprintf("back:product:%s", item.ProductID)
+	if len(items) <= 1 {
+		backCallback = "products"
+	}
+
 	text := MsgItemDetail(productName, item.Name, item.Description, shortID, item.Price, balance, availableCount)
-	h.bot.EditMessageText(chatID, msgID, text, KbItemDetail(itemID, availableCount, item.ProductID))
+	h.bot.EditMessageText(chatID, msgID, text, KbItemDetail(itemID, availableCount, backCallback))
 }
 
 func (h *CallbackHandler) handleSelectQuantity(ctx context.Context, chatID, msgID int64, userID uuid.UUID, idStr string, quantity int) {
@@ -259,10 +271,16 @@ func (h *CallbackHandler) handleSelectQuantity(ctx context.Context, chatID, msgI
 		return
 	}
 
+	_, items, _ := h.productService.GetProductWithItems(ctx, item.ProductID)
+	backCallback := fmt.Sprintf("back:product:%s", item.ProductID)
+	if len(items) <= 1 {
+		backCallback = "products"
+	}
+
 	if availableCount < quantity {
 		h.bot.EditMessageText(chatID, msgID,
 			fmt.Sprintf("⚠️ Kho hiện chỉ còn <b>%d</b> sản phẩm, không đủ số lượng bạn chọn (%d).", availableCount, quantity),
-			KbItemDetail(itemID, availableCount, item.ProductID))
+			KbItemDetail(itemID, availableCount, backCallback))
 		return
 	}
 

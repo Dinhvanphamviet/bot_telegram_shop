@@ -76,7 +76,7 @@ func KbItemList(items []model.ItemWithStock, productID uuid.UUID) *InlineKeyboar
 }
 
 // KbItemDetail builds the item detail keyboard with quantity selection buttons matching reference UI.
-func KbItemDetail(itemID uuid.UUID, available int, productID uuid.UUID) *InlineKeyboardMarkup {
+func KbItemDetail(itemID uuid.UUID, available int, backCallback string) *InlineKeyboardMarkup {
 	var rows [][]InlineKeyboardButton
 	if available > 0 {
 		rows = append(rows, []InlineKeyboardButton{
@@ -94,8 +94,12 @@ func KbItemDetail(itemID uuid.UUID, available int, productID uuid.UUID) *InlineK
 			{Text: "✏️ Nhập số khác", CallbackData: fmt.Sprintf("qty_custom:%s", itemID)},
 		})
 	}
+	if backCallback == "" {
+		backCallback = "products"
+	}
 	rows = append(rows, []InlineKeyboardButton{
-		{Text: "⬅️ Quay lại", CallbackData: fmt.Sprintf("back:product:%s", productID)},
+		{Text: "🔄 Làm mới", CallbackData: fmt.Sprintf("item:%s", itemID)},
+		{Text: "⬅️ Quay lại", CallbackData: backCallback},
 		{Text: "❌ Đóng", CallbackData: "close"},
 	})
 	return &InlineKeyboardMarkup{InlineKeyboard: rows}
