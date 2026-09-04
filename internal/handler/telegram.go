@@ -101,12 +101,16 @@ func (h *TelegramHandler) HandleSepayWebhook(w http.ResponseWriter, r *http.Requ
 	if xSignature == "" {
 		xSignature = r.Header.Get("X-Sepay-Signature")
 	}
+	xTimestamp := r.Header.Get("X-SePay-Timestamp")
+	if xTimestamp == "" {
+		xTimestamp = r.Header.Get("X-Sepay-Timestamp")
+	}
 
-	log.Printf("SePay webhook received: auth=%q, x-sig=%q, body=%s", authHeader, xSignature, string(body))
+	log.Printf("SePay webhook received: auth=%q, x-sig=%q, x-ts=%q, body=%s", authHeader, xSignature, xTimestamp, string(body))
 
 	// Verify authentication
-	if !sepay.VerifyWebhook(h.cfg.SepayWebhookSecret, h.cfg.SepayAPIKey, string(body), authHeader, xSignature) {
-		log.Printf("SePay webhook verification failed: auth=%q, x-sig=%q", authHeader, xSignature)
+	if !sepay.VerifyWebhook(h.cfg.SepayWebhookSecret, h.cfg.SepayAPIKey, string(body), authHeader, xSignature, xTimestamp) {
+		log.Printf("SePay webhook verification failed: auth=%q, x-sig=%q, x-ts=%q", authHeader, xSignature, xTimestamp)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
