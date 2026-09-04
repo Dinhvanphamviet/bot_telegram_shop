@@ -67,7 +67,7 @@ func (h *TelegramHandler) HandleTelegramWebhook(w http.ResponseWriter, r *http.R
 
 	// Process asynchronously to respond quickly
 	go func() {
-		ctx := r.Context()
+		ctx := context.Background()
 		if update.Message != nil {
 			h.commandHandler.HandleCommand(ctx, update.Message)
 		} else if update.CallbackQuery != nil {
