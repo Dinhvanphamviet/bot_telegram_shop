@@ -101,6 +101,12 @@ func (b *Bot) SendMessage(chatID int64, text string, keyboard interface{}) error
 
 // SendPhoto sends a photo with optional caption.
 func (b *Bot) SendPhoto(chatID int64, photoURL, caption string, keyboard interface{}) error {
+	_, err := b.SendPhotoReturnMsg(chatID, photoURL, caption, keyboard)
+	return err
+}
+
+// SendPhotoReturnMsg sends a photo and returns the created Telegram Message.
+func (b *Bot) SendPhotoReturnMsg(chatID int64, photoURL, caption string, keyboard interface{}) (*Message, error) {
 	params := map[string]interface{}{
 		"chat_id":    chatID,
 		"photo":      photoURL,
@@ -110,7 +116,25 @@ func (b *Bot) SendPhoto(chatID int64, photoURL, caption string, keyboard interfa
 	if keyboard != nil {
 		params["reply_markup"] = keyboard
 	}
-	return b.callAPI("sendPhoto", params)
+	var msg Message
+	if err := b.callAPIWithResult("sendPhoto", params, &msg); err != nil {
+		return nil, err
+	}
+	return &msg, nil
+}
+
+// EditMessageCaption edits the caption of an existing photo/media message.
+func (b *Bot) EditMessageCaption(chatID int64, messageID int64, caption string, keyboard *InlineKeyboardMarkup) error {
+	params := map[string]interface{}{
+		"chat_id":    chatID,
+		"message_id": messageID,
+		"caption":    caption,
+		"parse_mode": "HTML",
+	}
+	if keyboard != nil {
+		params["reply_markup"] = keyboard
+	}
+	return b.callAPI("editMessageCaption", params)
 }
 
 // EditMessageText edits the text of an existing message.
@@ -176,8 +200,13 @@ func (b *Bot) DeleteWebhook() error {
 	return b.callAPI("deleteWebhook", nil)
 }
 
-// callAPI makes a POST request to the Telegram Bot API.
+// callAPI makes a POST request to the Telegram Bot API without capturing result.
 func (b *Bot) callAPI(method string, params map[string]interface{}) error {
+	return b.callAPIWithResult(method, params, nil)
+}
+
+// callAPIWithResult makes a POST request to the Telegram Bot API and parses result into out.
+func (b *Bot) callAPIWithResult(method string, params map[string]interface{}, out interface{}) error {
 	url := fmt.Sprintf("%s/%s", b.apiURL, method)
 
 	var body io.Reader
@@ -201,10 +230,23 @@ func (b *Bot) callAPI(method string, params map[string]interface{}) error {
 	}
 	defer resp.Body.Close()
 
+	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
 		log.Printf("Telegram API error: status=%d, body=%s, method=%s", resp.StatusCode, string(respBody), method)
 		return fmt.Errorf("telegram API error: %d", resp.StatusCode)
+	}
+
+	if out != nil {
+		var apiResp struct {
+			Ok     bool            `json:"ok"`
+			Result json.RawMessage `json:"result"`
+		}
+		if err := json.Unmarshal(respBody, &apiResp); err != nil {
+			return fmt.Errorf("unmarshal api response: %w", err)
+		}
+		if err := json.Unmarshal(apiResp.Result, out); err != nil {
+			return fmt.Errorf("unmarshal result: %w", err)
+		}
 	}
 
 	return nil

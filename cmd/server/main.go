@@ -66,8 +66,8 @@ func main() {
 
 	stateManager := bot.NewStateManager()
 	telegramBot := bot.NewBot(cfg.TelegramBotToken)
-	commandHandler := bot.NewCommandHandler(telegramBot, cfg, userService, productService, orderService, walletService, stateManager)
-	callbackHandler := bot.NewCallbackHandler(telegramBot, cfg, userService, productService, orderService, walletService, stateManager)
+	commandHandler := bot.NewCommandHandler(telegramBot, cfg, userService, productService, orderService, walletService, paymentService, stateManager)
+	callbackHandler := bot.NewCallbackHandler(telegramBot, cfg, userService, productService, orderService, walletService, paymentService, stateManager)
 
 	telegramHandler := handler.NewTelegramHandler(telegramBot, cfg, commandHandler, callbackHandler, paymentService, userService)
 	adminHandler := handler.NewAdminHandler(telegramBot, productService, orderService, walletService, userService)
@@ -104,6 +104,9 @@ func main() {
 				continue
 			}
 			for _, exp := range expiredList {
+				if exp.ChatID != 0 && exp.MessageID != 0 {
+					_ = telegramBot.EditMessageCaption(exp.ChatID, exp.MessageID, bot.MsgPaymentExpiredCaption(exp.TransferContent, exp.Amount), bot.KbBackToMenu())
+				}
 				telegramBot.SendMessage(exp.TelegramID, bot.MsgPaymentExpired(exp.TransferContent), bot.KbBackToMenu())
 			}
 		}

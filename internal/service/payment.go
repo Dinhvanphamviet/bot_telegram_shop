@@ -271,10 +271,47 @@ func (s *PaymentService) processDepositPayment(ctx context.Context, payment *mod
 
 // ExpiredPaymentNotification holds information to notify a user about an expired payment.
 type ExpiredPaymentNotification struct {
+	PaymentID       uuid.UUID
 	TelegramID      int64
+	ChatID          int64
+	MessageID       int64
 	TransferContent string
 	Amount          int64
 	PaymentType     string
+}
+
+// SetMessageInfo records Telegram chat_id and message_id for the QR message.
+func (s *PaymentService) SetMessageInfo(ctx context.Context, paymentID uuid.UUID, chatID, messageID int64) error {
+	return s.paymentRepo.SetMessageInfo(ctx, paymentID, chatID, messageID)
+}
+
+// CancelPayment cancels a pending payment and its associated order (if any).
+func (s *PaymentService) CancelPayment(ctx context.Context, paymentID uuid.UUID) error {
+	payment, err := s.paymentRepo.FindByID(ctx, paymentID)
+	if err != nil || payment == nil {
+		return fmt.Errorf("payment not found")
+	}
+	if payment.Status != model.PaymentStatusPending {
+		return fmt.Errorf("payment is not pending")
+	}
+
+	if err := s.paymentRepo.CancelPayment(ctx, paymentID); err != nil {
+		return fmt.Errorf("cancel payment: %w", err)
+	}
+
+	if payment.OrderID != nil && payment.PaymentType == model.PaymentTypeOrder {
+		tx, err := s.db.Begin(ctx)
+		if err != nil {
+			return fmt.Errorf("begin tx: %w", err)
+		}
+		defer tx.Rollback(ctx)
+
+		if err := s.orderRepo.UpdateStatus(ctx, tx, *payment.OrderID, model.OrderStatusCancelled); err != nil {
+			return fmt.Errorf("cancel order: %w", err)
+		}
+		return tx.Commit(ctx)
+	}
+	return nil
 }
 
 // ExpirePendingPayments expires all pending payments past their deadline.
@@ -306,10 +343,21 @@ func (s *PaymentService) ExpirePendingPayments(ctx context.Context) ([]ExpiredPa
 			tx.Commit(ctx)
 		}
 
+		var cID, mID int64
+		if p.ChatID != nil {
+			cID = *p.ChatID
+		}
+		if p.MessageID != nil {
+			mID = *p.MessageID
+		}
+
 		user, err := s.userRepo.FindByID(ctx, p.UserID)
 		if err == nil && user != nil && user.TelegramID > 0 {
 			notifications = append(notifications, ExpiredPaymentNotification{
+				PaymentID:       p.ID,
 				TelegramID:      user.TelegramID,
+				ChatID:          cID,
+				MessageID:       mID,
 				TransferContent: p.TransferContent,
 				Amount:          p.Amount,
 				PaymentType:     p.PaymentType,

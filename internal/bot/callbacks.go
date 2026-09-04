@@ -21,6 +21,7 @@ type CallbackHandler struct {
 	productService *service.ProductService
 	orderService   *service.OrderService
 	walletService  *service.WalletService
+	paymentService *service.PaymentService
 	stateManager   *StateManager
 }
 
@@ -32,6 +33,7 @@ func NewCallbackHandler(
 	productService *service.ProductService,
 	orderService *service.OrderService,
 	walletService *service.WalletService,
+	paymentService *service.PaymentService,
 	stateManager *StateManager,
 ) *CallbackHandler {
 	return &CallbackHandler{
@@ -41,6 +43,7 @@ func NewCallbackHandler(
 		productService: productService,
 		orderService:   orderService,
 		walletService:  walletService,
+		paymentService: paymentService,
 		stateManager:   stateManager,
 	}
 }
@@ -129,6 +132,9 @@ func (h *CallbackHandler) HandleCallback(ctx context.Context, cb *CallbackQuery)
 			qty, _ := strconv.Atoi(parts[2])
 			h.handleConfirmBuyQR(ctx, chatID, msgID, user.ID, parts[1], qty)
 		}
+
+	case strings.HasPrefix(data, "cancel_payment:"):
+		h.handleCancelPayment(ctx, chatID, msgID, cb.ID, strings.TrimPrefix(data, "cancel_payment:"))
 
 	case strings.HasPrefix(data, "buy_qr:"):
 		h.handleBuyQR(ctx, chatID, msgID, user.ID, data[7:])
@@ -381,13 +387,34 @@ func (h *CallbackHandler) handleConfirmBuyQR(ctx context.Context, chatID, msgID 
 		return
 	}
 
-	caption := MsgQRPaymentOrder(item.Name, quantity, order.Amount, payment.TransferContent, 15)
-	if err := h.bot.SendPhoto(chatID, qrURL, caption, KbBackToMenu()); err != nil {
+	caption := MsgQRPaymentOrder(item.Name, quantity, order.Amount, payment.TransferContent, 10)
+	qrMsg, err := h.bot.SendPhotoReturnMsg(chatID, qrURL, caption, KbCancelPayment(payment.ID.String()))
+	if err != nil {
 		log.Printf("Error sending purchase QR: %v", err)
 		h.bot.EditMessageText(chatID, msgID, MsgError(), KbBackToMenu())
 		return
 	}
-	h.bot.EditMessageText(chatID, msgID, "✅ Đã tạo mã QR thanh toán bên dưới 👇", nil)
+	if qrMsg != nil {
+		_ = h.paymentService.SetMessageInfo(ctx, payment.ID, chatID, qrMsg.MessageID)
+	}
+	_ = h.bot.DeleteMessage(chatID, msgID)
+}
+
+func (h *CallbackHandler) handleCancelPayment(ctx context.Context, chatID, msgID int64, callbackID, paymentIDStr string) {
+	paymentID, err := uuid.Parse(paymentIDStr)
+	if err != nil {
+		h.bot.AnswerCallbackQuery(callbackID, "Mã giao dịch không hợp lệ")
+		return
+	}
+
+	if err := h.paymentService.CancelPayment(ctx, paymentID); err != nil {
+		log.Printf("Error cancelling payment %s: %v", paymentID, err)
+		h.bot.AnswerCallbackQuery(callbackID, "Giao dịch không thể hủy (có thể đã hết hạn hoặc đã hoàn tất)")
+		return
+	}
+
+	h.bot.AnswerCallbackQuery(callbackID, "Đã hủy giao dịch thành công!")
+	_ = h.bot.EditMessageCaption(chatID, msgID, MsgPaymentCancelledCaption(paymentIDStr[:8]), KbBackToMenu())
 }
 
 func (h *CallbackHandler) handleBuyQR(ctx context.Context, chatID, msgID int64, userID uuid.UUID, idStr string) {
@@ -424,12 +451,16 @@ func (h *CallbackHandler) handleDeposit(ctx context.Context, chatID, msgID int64
 		return
 	}
 
-	if err := h.bot.SendPhoto(chatID, qrURL, MsgDepositQR(amount, payment.TransferContent), KbBackToMenu()); err != nil {
+	qrMsg, err := h.bot.SendPhotoReturnMsg(chatID, qrURL, MsgDepositQR(amount, payment.TransferContent), KbCancelPayment(payment.ID.String()))
+	if err != nil {
 		log.Printf("Error sending deposit QR: %v", err)
 		h.bot.EditMessageText(chatID, msgID, MsgError(), KbBackToMenu())
 		return
 	}
-	h.bot.EditMessageText(chatID, msgID, "✅ Đã tạo mã QR nạp tiền bên dưới 👇", nil)
+	if qrMsg != nil {
+		_ = h.paymentService.SetMessageInfo(ctx, payment.ID, chatID, qrMsg.MessageID)
+	}
+	_ = h.bot.DeleteMessage(chatID, msgID)
 }
 
 func (h *CallbackHandler) handleWallet(ctx context.Context, chatID, msgID int64, userID uuid.UUID) {

@@ -75,7 +75,7 @@ func (s *WalletService) DepositWithQR(ctx context.Context, userID uuid.UUID, amo
 		QRURL:           qrURL,
 		TransferContent: transferContent,
 		PaymentType:     model.PaymentTypeDeposit,
-		ExpiredAt:       time.Now().Add(30 * time.Minute),
+		ExpiredAt:       time.Now().Add(10 * time.Minute),
 	}
 	if err := s.paymentRepo.Create(ctx, payment); err != nil {
 		return nil, "", fmt.Errorf("create payment: %w", err)

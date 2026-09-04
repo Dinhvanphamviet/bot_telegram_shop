@@ -8,10 +8,11 @@ import (
 
 // Payment status constants.
 const (
-	PaymentStatusPending = "PENDING"
-	PaymentStatusSuccess = "SUCCESS"
-	PaymentStatusFailed  = "FAILED"
-	PaymentStatusExpired = "EXPIRED"
+	PaymentStatusPending   = "PENDING"
+	PaymentStatusSuccess   = "SUCCESS"
+	PaymentStatusFailed    = "FAILED"
+	PaymentStatusExpired   = "EXPIRED"
+	PaymentStatusCancelled = "CANCELLED"
 )
 
 // Payment type constants.
@@ -28,12 +29,14 @@ type Payment struct {
 	Provider              string     `json:"provider"`
 	ProviderTransactionID *string    `json:"provider_transaction_id,omitempty"`
 	Amount                int64      `json:"amount"`
-	Status                string     `json:"status"` // PENDING, SUCCESS, FAILED, EXPIRED
+	Status                string     `json:"status"` // PENDING, SUCCESS, FAILED, EXPIRED, CANCELLED
 	QRURL                 string     `json:"qr_url,omitempty"`
 	TransferContent       string     `json:"transfer_content"`
 	PaymentType           string     `json:"payment_type"` // ORDER, DEPOSIT
 	ExpiredAt             time.Time  `json:"expired_at"`
 	PaidAt                *time.Time `json:"paid_at,omitempty"`
+	ChatID                *int64     `json:"chat_id,omitempty"`
+	MessageID             *int64     `json:"message_id,omitempty"`
 	CreatedAt             time.Time  `json:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at"`
 }

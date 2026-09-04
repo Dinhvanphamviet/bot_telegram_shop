@@ -189,7 +189,7 @@ func MsgDepositQR(amount int64, transferContent string) string {
 📱 Quét mã QR bên trên để nạp tiền.
 
 ⚠️ Chuyển <b>đúng số tiền</b> và <b>đúng nội dung</b> để hệ thống tự động xác nhận.
-⏳ Hết hạn sau 30 phút.`,
+⏳ Hết hạn sau 10 phút.`,
 		FormatMoney(amount), transferContent)
 }
 
@@ -247,6 +247,31 @@ Mã giao dịch: <code>%s</code>
 Đã quá thời gian chờ thanh toán nên hệ thống đã tự động hủy yêu cầu này.
 
 💡 <i>Nếu bạn vẫn muốn nạp tiền hoặc mua hàng, vui lòng tạo mã mới từ Menu nhé!</i>`, content)
+}
+
+// MsgPaymentExpiredCaption returns the updated caption for the QR photo when it expires.
+func MsgPaymentExpiredCaption(content string, amount int64) string {
+	return fmt.Sprintf(`⚠️ <b>MÃ THANH TOÁN ĐÃ HẾT HẠN!</b>
+───────────────────
+📝 Nội dung: <code>%s</code>
+💰 Số tiền: <b>%s</b>
+
+⏰ Giao dịch đã quá hạn 10 phút và đã bị vô hiệu hóa.
+🚫 <b>Vui lòng KHÔNG chuyển khoản vào mã này nữa!</b>
+
+💡 <i>Nếu cần mua hàng hoặc nạp tiền, vui lòng bấm nút bên dưới để tạo đơn mới.</i>`, content, FormatMoney(amount))
+}
+
+// MsgPaymentCancelledCaption returns the updated caption for the QR photo when the user cancels it.
+func MsgPaymentCancelledCaption(content string) string {
+	return fmt.Sprintf(`❌ <b>GIAO DỊCH ĐÃ ĐƯỢC HỦY</b>
+───────────────────
+📝 Mã giao dịch: <code>%s</code>
+
+Quý khách đã chủ động hủy giao dịch này.
+🚫 <b>Vui lòng KHÔNG chuyển khoản vào mã QR này nữa!</b>
+
+💡 <i>Quý khách có thể quay lại Menu để chọn sản phẩm khác bất cứ lúc nào.</i>`, content)
 }
 
 // MsgItemDetail returns product details formatted matching reference UI screenshot.

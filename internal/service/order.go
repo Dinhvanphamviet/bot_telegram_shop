@@ -194,7 +194,7 @@ func (s *OrderService) PurchaseWithQR(ctx context.Context, userID, itemID uuid.U
 		QRURL:           qrURL,
 		TransferContent: transferContent,
 		PaymentType:     model.PaymentTypeOrder,
-		ExpiredAt:       time.Now().Add(15 * time.Minute),
+		ExpiredAt:       time.Now().Add(10 * time.Minute),
 	}
 	if err := s.paymentRepo.Create(ctx, payment); err != nil {
 		return nil, nil, "", fmt.Errorf("create payment: %w", err)

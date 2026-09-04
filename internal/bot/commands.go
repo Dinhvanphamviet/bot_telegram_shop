@@ -21,6 +21,7 @@ type CommandHandler struct {
 	productService *service.ProductService
 	orderService   *service.OrderService
 	walletService  *service.WalletService
+	paymentService *service.PaymentService
 	stateManager   *StateManager
 }
 
@@ -32,6 +33,7 @@ func NewCommandHandler(
 	productService *service.ProductService,
 	orderService *service.OrderService,
 	walletService *service.WalletService,
+	paymentService *service.PaymentService,
 	stateManager *StateManager,
 ) *CommandHandler {
 	return &CommandHandler{
@@ -41,6 +43,7 @@ func NewCommandHandler(
 		productService: productService,
 		orderService:   orderService,
 		walletService:  walletService,
+		paymentService: paymentService,
 		stateManager:   stateManager,
 	}
 }
@@ -234,10 +237,14 @@ func (h *CommandHandler) handleInputDepositAmount(ctx context.Context, msg *Mess
 		return
 	}
 
-	if err := h.bot.SendPhoto(msg.Chat.ID, qrURL, MsgDepositQR(amount, payment.TransferContent), KbBackToMenu()); err != nil {
+	qrMsg, err := h.bot.SendPhotoReturnMsg(msg.Chat.ID, qrURL, MsgDepositQR(amount, payment.TransferContent), KbCancelPayment(payment.ID.String()))
+	if err != nil {
 		log.Printf("Error sending deposit QR: %v", err)
 		h.bot.SendMessage(msg.Chat.ID, MsgError(), KbBackToMenu())
 		return
+	}
+	if qrMsg != nil {
+		_ = h.paymentService.SetMessageInfo(ctx, payment.ID, msg.Chat.ID, qrMsg.MessageID)
 	}
 }
 

@@ -201,6 +201,20 @@ func KbBackToMenu() *InlineKeyboardMarkup {
 	}
 }
 
+// KbCancelPayment builds a keyboard with a cancel button for pending payments.
+func KbCancelPayment(paymentID string) *InlineKeyboardMarkup {
+	return &InlineKeyboardMarkup{
+		InlineKeyboard: [][]InlineKeyboardButton{
+			{
+				{Text: "❌ Hủy giao dịch", CallbackData: fmt.Sprintf("cancel_payment:%s", paymentID)},
+			},
+			{
+				{Text: "🔙 Menu", CallbackData: "back:menu"},
+			},
+		},
+	}
+}
+
 // KbOrders builds the orders navigation keyboard.
 func KbOrders(hasMore bool, currentPage int) *InlineKeyboardMarkup {
 	var rows [][]InlineKeyboardButton
