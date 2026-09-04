@@ -59,27 +59,43 @@ func (h *CommandHandler) HandleCommand(ctx context.Context, msg *Message) {
 		return
 	}
 
-	// If message is a slash command, clear state and route command
-	if strings.HasPrefix(msg.Text, "/") {
+	text := strings.TrimSpace(msg.Text)
+
+	// Check if message is a slash command or a bottom reply button
+	switch text {
+	case "/start", "/menu":
 		h.stateManager.Clear(msg.From.ID)
-		switch msg.Text {
-		case "/start", "/menu":
-			h.handleStart(ctx, msg)
-		case "/products":
-			h.handleProducts(ctx, msg)
-		case "/wallet":
-			h.handleWallet(ctx, msg)
-		case "/orders":
-			h.handleOrders(ctx, msg)
-		case "/clear", "/clean":
-			h.handleClear(ctx, msg)
-		case "/help":
-			h.handleHelp(ctx, msg)
-		case "/admin":
-			h.handleAdmin(ctx, msg)
-		default:
-			h.handleStart(ctx, msg)
-		}
+		h.handleStart(ctx, msg)
+		return
+	case "/products", "🛒 Sản phẩm":
+		h.stateManager.Clear(msg.From.ID)
+		h.handleProducts(ctx, msg)
+		return
+	case "/wallet", "💰 Ví của tôi":
+		h.stateManager.Clear(msg.From.ID)
+		h.handleWallet(ctx, msg)
+		return
+	case "/orders", "📦 Đơn hàng":
+		h.stateManager.Clear(msg.From.ID)
+		h.handleOrders(ctx, msg)
+		return
+	case "/clear", "/clean", "🧹 Làm sạch":
+		h.stateManager.Clear(msg.From.ID)
+		h.handleClear(ctx, msg)
+		return
+	case "/help", "❓ Trợ giúp":
+		h.stateManager.Clear(msg.From.ID)
+		h.handleHelp(ctx, msg)
+		return
+	case "/admin":
+		h.stateManager.Clear(msg.From.ID)
+		h.handleAdmin(ctx, msg)
+		return
+	}
+
+	if strings.HasPrefix(text, "/") {
+		h.stateManager.Clear(msg.From.ID)
+		h.handleStart(ctx, msg)
 		return
 	}
 
@@ -106,7 +122,7 @@ func (h *CommandHandler) handleStart(_ context.Context, msg *Message) {
 	if msg.From != nil && msg.From.FirstName != "" {
 		firstName = msg.From.FirstName
 	}
-	h.bot.SendMessage(msg.Chat.ID, MsgWelcome(firstName), KbMainMenu())
+	h.bot.SendMessage(msg.Chat.ID, MsgWelcome(firstName), KbPersistentReplyMenu())
 }
 
 func (h *CommandHandler) handleProducts(ctx context.Context, msg *Message) {
@@ -185,7 +201,7 @@ func (h *CommandHandler) handleClear(_ context.Context, msg *Message) {
 	if msg.From != nil && msg.From.FirstName != "" {
 		firstName = msg.From.FirstName
 	}
-	h.bot.SendMessage(msg.Chat.ID, fmt.Sprintf("🧹 <b>Đã dọn dẹp đoạn chat!</b>\n\n%s", MsgWelcome(firstName)), KbMainMenu())
+	h.bot.SendMessage(msg.Chat.ID, fmt.Sprintf("🧹 <b>Đã dọn dẹp đoạn chat!</b>\n\n%s", MsgWelcome(firstName)), KbPersistentReplyMenu())
 }
 
 

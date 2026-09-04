@@ -22,6 +22,24 @@ func KbMainMenu() *InlineKeyboardMarkup {
 	}
 }
 
+// KbPersistentReplyMenu builds the persistent bottom keyboard with quick access buttons.
+func KbPersistentReplyMenu() *ReplyKeyboardMarkup {
+	return &ReplyKeyboardMarkup{
+		Keyboard: [][]KeyboardButton{
+			{
+				{Text: "🛒 Sản phẩm"},
+				{Text: "💰 Ví của tôi"},
+			},
+			{
+				{Text: "📦 Đơn hàng"},
+				{Text: "🧹 Làm sạch"},
+			},
+		},
+		ResizeKeyboard: true,
+		IsPersistent:   true,
+	}
+}
+
 // KbProductList builds the product list keyboard.
 func KbProductList(products []model.Product) *InlineKeyboardMarkup {
 	var rows [][]InlineKeyboardButton
@@ -113,11 +131,11 @@ func KbConfirmOrder(itemID uuid.UUID, quantity int, canWallet bool) *InlineKeybo
 			{Text: "💰 Mua bằng Ví (nhanh)", CallbackData: fmt.Sprintf("confirm_buy_wallet:%s:%d", itemID, quantity)},
 		})
 		rows = append(rows, []InlineKeyboardButton{
-			{Text: "💳 Mua bằng QR SePay", CallbackData: fmt.Sprintf("confirm_buy_qr:%s:%d", itemID, quantity)},
+			{Text: "💳 Mua bằng QR", CallbackData: fmt.Sprintf("confirm_buy_qr:%s:%d", itemID, quantity)},
 		})
 	} else {
 		rows = append(rows, []InlineKeyboardButton{
-			{Text: "💳 Mua bằng QR SePay", CallbackData: fmt.Sprintf("confirm_buy_qr:%s:%d", itemID, quantity)},
+			{Text: "💳 Mua bằng QR", CallbackData: fmt.Sprintf("confirm_buy_qr:%s:%d", itemID, quantity)},
 		})
 		rows = append(rows, []InlineKeyboardButton{
 			{Text: "💵 Nạp tiền vào ví", CallbackData: "wallet"},

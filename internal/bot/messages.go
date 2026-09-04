@@ -296,7 +296,7 @@ func MsgConfirmOrder(itemName string, quantity int, unitPrice, totalAmount, bala
 		walletNotice = "✅ <i>Ví đủ số dư để thanh toán ngay lập tức.</i>"
 	} else {
 		deficit := totalAmount - balance
-		walletNotice = fmt.Sprintf("⚠️ <i>Ví còn thiếu <b>%s</b>. Bạn có thể thanh toán trực tiếp qua SePay QR hoặc nạp thêm tiền.</i>", FormatMoney(deficit))
+		walletNotice = fmt.Sprintf("⚠️ <i>Ví còn thiếu <b>%s</b>. Bạn có thể thanh toán trực tiếp qua mã QR hoặc nạp thêm tiền.</i>", FormatMoney(deficit))
 	}
 
 	return fmt.Sprintf(`🛒 <b>XÁC NHẬN ĐƠN HÀNG</b>

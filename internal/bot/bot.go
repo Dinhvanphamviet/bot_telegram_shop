@@ -73,8 +73,21 @@ type InlineKeyboardButton struct {
 	URL          string `json:"url,omitempty"`
 }
 
+// ReplyKeyboardMarkup represents a custom keyboard with reply options.
+type ReplyKeyboardMarkup struct {
+	Keyboard        [][]KeyboardButton `json:"keyboard"`
+	ResizeKeyboard  bool               `json:"resize_keyboard"`
+	IsPersistent    bool               `json:"is_persistent"`
+	OneTimeKeyboard bool               `json:"one_time_keyboard,omitempty"`
+}
+
+// KeyboardButton represents one button of the reply keyboard.
+type KeyboardButton struct {
+	Text string `json:"text"`
+}
+
 // SendMessage sends a text message.
-func (b *Bot) SendMessage(chatID int64, text string, keyboard *InlineKeyboardMarkup) error {
+func (b *Bot) SendMessage(chatID int64, text string, keyboard interface{}) error {
 	params := map[string]interface{}{
 		"chat_id":    chatID,
 		"text":       text,
@@ -87,7 +100,7 @@ func (b *Bot) SendMessage(chatID int64, text string, keyboard *InlineKeyboardMar
 }
 
 // SendPhoto sends a photo with optional caption.
-func (b *Bot) SendPhoto(chatID int64, photoURL, caption string, keyboard *InlineKeyboardMarkup) error {
+func (b *Bot) SendPhoto(chatID int64, photoURL, caption string, keyboard interface{}) error {
 	params := map[string]interface{}{
 		"chat_id":    chatID,
 		"photo":      photoURL,
