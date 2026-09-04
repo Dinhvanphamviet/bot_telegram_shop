@@ -136,7 +136,10 @@ func (h *TelegramHandler) HandleSepayWebhook(w http.ResponseWriter, r *http.Requ
 
 	// Send Telegram notification to user
 	if result != nil {
+		log.Printf("[SePay Webhook] Successfully processed payment, notifying user %s...", result.UserID)
 		go h.notifyUser(result)
+	} else {
+		log.Printf("[SePay Webhook] Ignored or no matching pending payment found for payload: %s", string(body))
 	}
 
 	w.Header().Set("Content-Type", "application/json")

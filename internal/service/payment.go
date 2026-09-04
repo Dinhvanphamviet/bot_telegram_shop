@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 
 	"telegram-shop/internal/model"
@@ -59,15 +60,16 @@ type PaymentResult struct {
 // This is the core payment processing logic with full idempotency.
 func (s *PaymentService) HandleSepayWebhook(ctx context.Context, payload *sepay.WebhookPayload) (*PaymentResult, error) {
 	// Only process incoming transfers
-	if payload.TransferType != "in" {
-		log.Printf("Ignoring outgoing transfer: %s", payload.Content)
+	if !strings.EqualFold(strings.TrimSpace(payload.TransferType), "in") {
+		log.Printf("[SePay] Ignoring non-incoming transfer (type=%s): %s", payload.TransferType, payload.Content)
 		return nil, nil
 	}
 
-	// Extract transfer content — match against our payments
-	content := extractTransferContent(payload.Content)
+	// Extract transfer content — search across Content, Description, and Code
+	content := extractTransferContent(payload.Content, payload.Description, payload.Code)
 	if content == "" {
-		log.Printf("No matching transfer content found in: %s", payload.Content)
+		log.Printf("[SePay] No matching transfer content found in content=%q, desc=%q, code=%q",
+			payload.Content, payload.Description, payload.Code)
 		return nil, nil
 	}
 
@@ -77,7 +79,8 @@ func (s *PaymentService) HandleSepayWebhook(ctx context.Context, payload *sepay.
 		return nil, fmt.Errorf("find payment: %w", err)
 	}
 	if payment == nil {
-		log.Printf("No payment found for transfer content: %s", content)
+		log.Printf("[SePay] No payment found for transfer content: %s (content=%q, desc=%q, code=%q)",
+			content, payload.Content, payload.Description, payload.Code)
 		return nil, nil
 	}
 
@@ -322,22 +325,22 @@ func (s *PaymentService) ExpirePendingPayments(ctx context.Context) ([]ExpiredPa
 	return notifications, nil
 }
 
+var transferContentRegex = regexp.MustCompile(`(?i)SHOP[\s\-_:]*([A-Za-z0-9]{8})`)
+
 // extractTransferContent extracts our transfer content code from the bank transfer description.
 // SePay sends the full bank description which may contain extra text.
-// We look for our "SHOP" prefix pattern.
-func extractTransferContent(content string) string {
-	content = strings.ToUpper(strings.TrimSpace(content))
-	// Look for SHOP followed by 8 hex chars
-	idx := strings.Index(content, "SHOP")
-	if idx == -1 {
-		return ""
+// We look for our "SHOP" prefix pattern across content, description, or code.
+func extractTransferContent(texts ...string) string {
+	for _, text := range texts {
+		if text == "" {
+			continue
+		}
+		matches := transferContentRegex.FindStringSubmatch(text)
+		if len(matches) > 1 {
+			return "SHOP" + strings.ToUpper(matches[1])
+		}
 	}
-	// Extract SHOP + 8 characters
-	remaining := content[idx:]
-	if len(remaining) < 12 { // "SHOP" + 8 chars
-		return ""
-	}
-	return remaining[:12]
+	return ""
 }
 
 // formatMoney formats amount in VND (e.g. 50000 → "50.000đ").
